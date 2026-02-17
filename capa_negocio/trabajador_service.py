@@ -26,7 +26,7 @@ class TrabajadorService(BaseService):
         return self.repositorio.obtener_por_id(idtrabajador)
     
     def login(self, usuario: str, password: str) -> bool:
-        """Autentica un trabajador y carga sus permisos"""
+        """Autentica un trabajador por usuario y contraseña (compatibilidad)"""
         if not usuario or not password:
             logger.warning("⚠️ Usuario y contraseña requeridos")
             return False
@@ -50,6 +50,36 @@ class TrabajadorService(BaseService):
         else:
             logger.warning("❌ Usuario o contraseña incorrectos")
             return False
+    
+    def login_por_email(self, email: str, password: str) -> bool:
+        """Autentica un trabajador por email y contraseña"""
+        if not email or not password:
+            logger.warning("⚠️ Email y contraseña requeridos")
+            return False
+        
+        trabajador = self.repositorio.autenticar_por_email(email, password)
+        if trabajador:
+            # Obtener rol del trabajador
+            trabajador_completo = self.repositorio.obtener_por_id(trabajador['idtrabajador'])
+            trabajador['idrol'] = trabajador_completo.get('idrol')
+            
+            self.usuario_actual = trabajador
+            logger.success(f"✅ Bienvenido {trabajador['nombre']} {trabajador['apellidos']}")
+            
+            # Cargar permisos si hay servicio de roles disponible
+            if self.rol_service and trabajador['idrol']:
+                self.rol_service.cargar_permisos_usuario(trabajador['idrol'])
+                permisos = len(self.rol_service.get_permisos_usuario())
+                logger.info(f"🔑 Permisos cargados: {permisos} permisos")
+            
+            return True
+        else:
+            logger.warning("❌ Email o contraseña incorrectos")
+            return False
+    
+    def buscar_por_email(self, email: str) -> Optional[Dict]:
+        """Busca un trabajador por su email"""
+        return self.repositorio.buscar_por_email(email)
     
     def logout(self):
         """Cierra sesión del trabajador actual"""
@@ -167,23 +197,20 @@ class TrabajadorService(BaseService):
         """Elimina un trabajador"""
         if not self.validar_entero_positivo(idtrabajador, "ID de trabajador"):
             return False
-    def buscar_por_email(self, email):
-        """Busca un trabajador por su email"""
-        try:
-            self.cursor.execute("SELECT idtrabajador, nombre, email FROM trabajador WHERE email = ?", (email,))
-            return self.cursor.fetchone()
-        except:
-            return None
+        return self.repositorio.eliminar(idtrabajador)
     
     def actualizar_password(self, email, nueva_password):
         """Actualiza la contraseña de un trabajador"""
         try:
+            import hashlib
             password_hash = hashlib.sha256(nueva_password.encode()).hexdigest()
-            self.cursor.execute("UPDATE trabajador SET password_hash = ? WHERE email = ?", 
-                               (password_hash, email))
-            self.cursor.commit()
+            cursor = self.repositorio.cursor
+            cursor.execute("UPDATE trabajador SET password_hash = ? WHERE email = ?", 
+                          (password_hash, email))
+            cursor.commit()
+            logger.success(f"✅ Contraseña actualizada para email: {email}")
             return True
         except Exception as e:
             logger.error(f"❌ Error al actualizar password: {e}")
             return False
-        return self.repositorio.eliminar(idtrabajador)
+

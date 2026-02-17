@@ -19,7 +19,7 @@ class TrabajadorRepositorio:
             self.cursor.execute("""
                 SELECT idtrabajador, nombre, apellidos, sexo,
                        fecha_nacimiento, num_documento, direccion,
-                       telefono, email, usuario
+                       telefono, email, usuario, idrol
                 FROM trabajador ORDER BY apellidos, nombre
             """)
             columnas = [column[0] for column in self.cursor.description]
@@ -52,12 +52,11 @@ class TrabajadorRepositorio:
         """Autentica un trabajador por usuario y contraseña"""
         try:
             password_hash = self._hash_password(password)
-            self.cursor.execute(
-                """SELECT idtrabajador, nombre, apellidos, usuario, email
-                   FROM trabajador 
-                   WHERE usuario = ? AND password_hash = ?""",
-                (usuario, password_hash)
-            )
+            self.cursor.execute("""
+                SELECT idtrabajador, nombre, apellidos, usuario, email, idrol
+                FROM trabajador 
+                WHERE usuario = ? AND password_hash = ?
+            """, (usuario, password_hash))
             row = self.cursor.fetchone()
             if row:
                 return {
@@ -65,11 +64,59 @@ class TrabajadorRepositorio:
                     'nombre': row[1],
                     'apellidos': row[2],
                     'usuario': row[3],
-                    'email': row[4]
+                    'email': row[4],
+                    'idrol': row[5]
                 }
             return None
         except Exception as e:
             logger.error(f"❌ Error en autenticación: {e}")
+            return None
+    
+    def buscar_por_email(self, email: str) -> Optional[Dict]:
+        """Busca un trabajador por su email"""
+        try:
+            self.cursor.execute("""
+                SELECT idtrabajador, nombre, apellidos, usuario, email, idrol
+                FROM trabajador 
+                WHERE email = ?
+            """, (email,))
+            row = self.cursor.fetchone()
+            if row:
+                return {
+                    'idtrabajador': row[0],
+                    'nombre': row[1],
+                    'apellidos': row[2],
+                    'usuario': row[3],
+                    'email': row[4],
+                    'idrol': row[5]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error al buscar por email: {e}")
+            return None
+    
+    def autenticar_por_email(self, email: str, password: str) -> Optional[Dict]:
+        """Autentica un trabajador por email y contraseña"""
+        try:
+            password_hash = self._hash_password(password)
+            self.cursor.execute("""
+                SELECT idtrabajador, nombre, apellidos, usuario, email, idrol
+                FROM trabajador 
+                WHERE email = ? AND password_hash = ?
+            """, (email, password_hash))
+            row = self.cursor.fetchone()
+            if row:
+                return {
+                    'idtrabajador': row[0],
+                    'nombre': row[1],
+                    'apellidos': row[2],
+                    'usuario': row[3],
+                    'email': row[4],
+                    'idrol': row[5]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error en autenticación por email: {e}")
             return None
     
     def insertar(self, nombre: str, apellidos: str, sexo: str,
@@ -80,14 +127,13 @@ class TrabajadorRepositorio:
         """Inserta un nuevo trabajador"""
         try:
             password_hash = self._hash_password(password)
-            self.cursor.execute(
-                """INSERT INTO trabajador 
-                   (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
-                    direccion, telefono, email, usuario, password_hash) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            self.cursor.execute("""
+                INSERT INTO trabajador 
                 (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
-                 direccion, telefono, email, usuario, password_hash)
-            )
+                 direccion, telefono, email, usuario, password_hash) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
+                 direccion, telefono, email, usuario, password_hash))
             self.cursor.commit()
             logger.success(f"✅ Trabajador '{nombre} {apellidos}' insertado")
             return True
@@ -103,25 +149,23 @@ class TrabajadorRepositorio:
         try:
             if password:
                 password_hash = self._hash_password(password)
-                self.cursor.execute(
-                    """UPDATE trabajador 
-                       SET nombre = ?, apellidos = ?, sexo = ?, fecha_nacimiento = ?,
-                           num_documento = ?, direccion = ?, telefono = ?,
-                           email = ?, usuario = ?, password_hash = ?
-                       WHERE idtrabajador = ?""",
-                    (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
-                     direccion, telefono, email, usuario, password_hash, idtrabajador)
-                )
+                self.cursor.execute("""
+                    UPDATE trabajador 
+                    SET nombre = ?, apellidos = ?, sexo = ?, fecha_nacimiento = ?,
+                        num_documento = ?, direccion = ?, telefono = ?,
+                        email = ?, usuario = ?, password_hash = ?
+                    WHERE idtrabajador = ?
+                """, (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
+                     direccion, telefono, email, usuario, password_hash, idtrabajador))
             else:
-                self.cursor.execute(
-                    """UPDATE trabajador 
-                       SET nombre = ?, apellidos = ?, sexo = ?, fecha_nacimiento = ?,
-                           num_documento = ?, direccion = ?, telefono = ?,
-                           email = ?, usuario = ?
-                       WHERE idtrabajador = ?""",
-                    (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
-                     direccion, telefono, email, usuario, idtrabajador)
-                )
+                self.cursor.execute("""
+                    UPDATE trabajador 
+                    SET nombre = ?, apellidos = ?, sexo = ?, fecha_nacimiento = ?,
+                        num_documento = ?, direccion = ?, telefono = ?,
+                        email = ?, usuario = ?
+                    WHERE idtrabajador = ?
+                """, (nombre, apellidos, sexo, fecha_nacimiento, num_documento,
+                     direccion, telefono, email, usuario, idtrabajador))
             self.cursor.commit()
             logger.success(f"✅ Trabajador ID {idtrabajador} actualizado")
             return True

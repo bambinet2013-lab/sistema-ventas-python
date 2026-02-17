@@ -30,6 +30,7 @@ from capa_negocio.rol_service import RolService, PermisoDenegadoError
 from capa_negocio.base_service import BaseService
 from capa_negocio.email_service import EmailService
 from capa_negocio.usuario_admin_service import UsuarioAdminService
+from capa_negocio.token_service import TokenService
 
 from capa_presentacion.decoradores import requiere_permiso
 
@@ -53,6 +54,7 @@ class SistemaVentas:
         self.rol_service = None
         self.email_service = None
         self.usuario_admin_service = None
+        self.token_service = None
     
     def conectar_db(self):
         """Establece conexión con la base de datos"""
@@ -83,6 +85,7 @@ class SistemaVentas:
         )
         self.rol_service = RolService(rol_repo)
         self.usuario_admin_service = UsuarioAdminService(usuario_admin_repo, self.rol_service)
+        self.token_service = TokenService(self.conn)
         
         # Asignar rol_service a trabajador_service
         self.trabajador_service.rol_service = self.rol_service
@@ -91,8 +94,8 @@ class SistemaVentas:
         self.email_service = EmailService(
             smtp_server="smtp.gmail.com",
             smtp_port=587,
-            email_remitente="TU_CORREO@gmail.com",  # ← CAMBIA ESTO
-            password="TU_CONTRASEÑA_DE_APLICACION"  # ← CAMBIA ESTO
+            email_remitente="carlosberenguel554@gmail.com",  # ← CAMBIA ESTO
+            password="fhnh tiax mfus fmok"  # ← CAMBIA ESTO
         )
         
         return True
@@ -181,20 +184,46 @@ class SistemaVentas:
                 self.pausa()
     
     def _login_normal(self):
-        """Login normal con usuario y contraseña"""
-        usuario = input("Usuario: ")
+        """Login normal con email y contraseña"""
+        self.mostrar_cabecera("INICIAR SESIÓN POR EMAIL")
+        
+        print("🔐 Ingrese sus credenciales")
+        print()
+        email = input("Email: ")
         password = input("Contraseña: ")
         
-        if self.trabajador_service.login(usuario, password):
+        if self.trabajador_service.login_por_email(email, password):
             print("✅ Sesión iniciada correctamente")
         else:
-            print("❌ Error al iniciar sesión")
+            print("❌ Email o contraseña incorrectos")
         
         self.pausa()
     
     def _recuperar_contraseña(self):
-        """Proceso de recuperación de contraseña"""
-        self.mostrar_cabecera("RECUPERAR CONTRASEÑA")
+        """Proceso de recuperación con enlace mágico"""
+        while True:
+            self.mostrar_cabecera("RECUPERAR CONTRASEÑA")
+            
+            print("1. Solicitar enlace mágico por email")
+            print("2. Ya tengo un token, ingresar manualmente")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._solicitar_enlace_magico()
+            elif opcion == '2':
+                self._ingresar_token_manual()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    def _solicitar_enlace_magico(self):
+        """Solicita un enlace mágico por email"""
+        self.mostrar_cabecera("SOLICITAR ENLACE MÁGICO")
         
         email = input("Ingrese su email registrado: ")
         
@@ -206,36 +235,76 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Generar y enviar código
-        codigo = self.email_service.generar_codigo()
+        print(f"\n👤 Usuario encontrado: {usuario['nombre']} {usuario['apellidos']}")
+        print(f"📧 Email: {usuario['email']}")
+        print()
         
-        if self.email_service.enviar_codigo_recuperacion(email, codigo):
-            print(f"✅ Se ha enviado un código a {email}")
+        # Generar token
+        token = self.token_service.crear_token(usuario['idtrabajador'])
+        
+        if token:
+            # Enviar por correo
+            if self.email_service.enviar_enlace_magico(
+                email, token, usuario['nombre']
+            ):
+                print(f"✅ Se ha enviado un enlace mágico a:")
+                print(f"   {email}")
+                print(f"\n📧 Revisa tu bandeja de entrada (y carpeta SPAM)")
+                print(f"⏰ El enlace expirará en 30 minutos")
+                print(f"\n📝 Si no recibes el correo, usa la opción 2 para ingresar manualmente:")
+                print(f"   Token: {token}")
+            else:
+                print("❌ Error al enviar el correo")
+                print(f"\n📝 Para pruebas, usa este token manualmente:")
+                print(f"   {token}")
+        else:
+            print("❌ Error al generar el token")
+        
+        self.pausa()
+    
+    def _ingresar_token_manual(self):
+        """Permite ingresar un token manualmente para restablecer contraseña"""
+        self.mostrar_cabecera("INGRESAR TOKEN MANUAL")
+        
+        token = input("Ingrese el token recibido: ").strip()
+        
+        # Verificar token
+        idtrabajador = self.token_service.verificar_token(token)
+        
+        if idtrabajador:
+            usuario = self.trabajador_service.obtener_por_id(idtrabajador)
+            print(f"\n✅ Token válido para: {usuario['nombre']} {usuario['apellidos']}")
+            
+            # Solicitar nueva contraseña (con mensajes claros)
+            print("\n" + "="*50)
+            print("🔑 CAMBIO DE CONTRASEÑA")
+            print("="*50)
             print()
             
-            # Solicitar código
-            codigo_ingresado = input("Ingrese el código recibido: ")
+            # Desactivar logger temporalmente para evitar interferencias
+            logger.remove()
+            logger.add(lambda msg: None)  # Logger silencioso
             
-            if self.email_service.verificar_codigo(email, codigo_ingresado):
-                print("✅ Código verificado correctamente")
-                print()
-                
-                # Solicitar nueva contraseña
-                nueva_pass = input("Ingrese nueva contraseña (mínimo 6 caracteres): ")
-                confirmar = input("Confirme nueva contraseña: ")
-                
-                if nueva_pass == confirmar and len(nueva_pass) >= 6:
-                    if self.trabajador_service.actualizar_password(email, nueva_pass):
-                        print("✅ Contraseña actualizada correctamente")
-                        print("🔐 Ya puede iniciar sesión con su nueva contraseña")
-                    else:
-                        print("❌ Error al actualizar la contraseña")
+            try:
+                nueva_pass = input("➤ Ingrese NUEVA contraseña (mínimo 6 caracteres): ")
+                confirmar = input("➤ Confirme la NUEVA contraseña: ")
+            finally:
+                # Restaurar logger
+                logger.remove()
+                logger.add(sys.stderr, format="<level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
+            
+            if nueva_pass == confirmar and len(nueva_pass) >= 6:
+                if self.trabajador_service.actualizar_password(usuario['email'], nueva_pass):
+                    # Marcar token como usado
+                    self.token_service.marcar_token_usado(token)
+                    print("\n✅ Contraseña actualizada correctamente")
+                    print("🔐 Ya puede iniciar sesión con su nueva contraseña")
                 else:
-                    print("❌ Las contraseñas no coinciden o son muy cortas")
+                    print("\n❌ Error al actualizar la contraseña")
             else:
-                print("❌ Código incorrecto o expirado")
+                print("\n❌ Las contraseñas no coinciden o son muy cortas")
         else:
-            print("❌ Error al enviar el código. Intente más tarde")
+            print("\n❌ Token inválido o expirado")
         
         self.pausa()
     
@@ -582,6 +651,638 @@ class SistemaVentas:
         
         self.pausa()
     
+    def menu_clientes(self):
+        """Menú de gestión de clientes"""
+        while True:
+            self.mostrar_cabecera("GESTIÓN DE CLIENTES")
+            print("1. Listar clientes")
+            print("2. Buscar cliente")
+            print("3. Crear cliente")
+            print("4. Editar cliente")
+            print("5. Eliminar cliente")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._listar_clientes()
+            elif opcion == '2':
+                self._buscar_cliente()
+            elif opcion == '3':
+                self._crear_cliente()
+            elif opcion == '4':
+                self._editar_cliente()
+            elif opcion == '5':
+                self._eliminar_cliente()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    @requiere_permiso('clientes_ver')
+    def _listar_clientes(self):
+        """Lista todos los clientes"""
+        self.mostrar_cabecera("LISTADO DE CLIENTES")
+        
+        clientes = self.cliente_service.listar()
+        
+        if not clientes:
+            print("📭 No hay clientes registrados")
+        else:
+            print(f"{'ID':<5} {'NOMBRE':<25} {'DOCUMENTO':<15} {'TELÉFONO':<12} {'EMAIL':<25}")
+            print("-" * 82)
+            for c in clientes:
+                nombre_completo = f"{c['nombre']} {c['apellidos']}"
+                print(f"{c['idcliente']:<5} {nombre_completo:<25} {c['num_documento']:<15} {c.get('telefono', ''):<12} {c.get('email', ''):<25}")
+        
+        self.pausa()
+    
+    @requiere_permiso('clientes_crear')
+    def _crear_cliente(self):
+        """Crea un nuevo cliente"""
+        self.mostrar_cabecera("CREAR CLIENTE")
+        
+        print("📝 Complete los datos del cliente:")
+        print()
+        
+        nombre = input("Nombre: ")
+        apellidos = input("Apellidos: ")
+        sexo = input("Sexo (M/F/O): ").upper()
+        fecha_nac = input("Fecha de nacimiento (YYYY-MM-DD): ")
+        tipo_doc = input("Tipo de documento (DNI/RUC/PASAPORTE): ").upper()
+        num_doc = input("Número de documento: ")
+        direccion = input("Dirección (opcional): ") or None
+        telefono = input("Teléfono (opcional): ") or None
+        email = input("Email (opcional): ") or None
+        
+        if self.cliente_service.crear(
+            nombre, apellidos, fecha_nac, tipo_doc, num_doc,
+            sexo, direccion, telefono, email
+        ):
+            print("✅ Cliente creado exitosamente")
+        else:
+            print("❌ Error al crear el cliente")
+        
+        self.pausa()
+    
+    @requiere_permiso('clientes_ver')
+    def _buscar_cliente(self):
+        """Busca un cliente por ID o documento"""
+        self.mostrar_cabecera("BUSCAR CLIENTE")
+        
+        print("1. Buscar por ID")
+        print("2. Buscar por documento")
+        opcion = input("🔹 Seleccione: ").strip()
+        
+        if opcion == '1':
+            try:
+                idcliente = int(input("ID del cliente: "))
+                cliente = self.cliente_service.obtener_por_id(idcliente)
+                if cliente:
+                    self._mostrar_detalle_cliente(cliente)
+                else:
+                    print(f"❌ No existe cliente con ID {idcliente}")
+            except:
+                print("❌ ID inválido")
+        
+        elif opcion == '2':
+            doc = input("Número de documento: ")
+            cliente = self.cliente_service.buscar_por_documento(doc)
+            if cliente:
+                # Obtener datos completos
+                cliente = self.cliente_service.obtener_por_id(cliente['idcliente'])
+                self._mostrar_detalle_cliente(cliente)
+            else:
+                print(f"❌ No existe cliente con documento {doc}")
+        
+        self.pausa()
+    
+    def _mostrar_detalle_cliente(self, c):
+        """Muestra detalles completos de un cliente"""
+        print(f"\n📌 ID: {c['idcliente']}")
+        print(f"📌 Nombre: {c['nombre']} {c['apellidos']}")
+        print(f"📌 Sexo: {c.get('sexo', 'No especificado')}")
+        print(f"📌 Fecha Nac.: {c['fecha_nacimiento']}")
+        print(f"📌 Documento: {c['tipo_documento']} - {c['num_documento']}")
+        print(f"📌 Dirección: {c.get('direccion', 'No registrada')}")
+        print(f"📌 Teléfono: {c.get('telefono', 'No registrado')}")
+        print(f"📌 Email: {c.get('email', 'No registrado')}")
+    
+    @requiere_permiso('clientes_editar')
+    def _editar_cliente(self):
+        """Edita un cliente existente"""
+        self.mostrar_cabecera("EDITAR CLIENTE")
+        
+        try:
+            idcliente = int(input("ID del cliente a editar: "))
+            cliente = self.cliente_service.obtener_por_id(idcliente)
+            
+            if not cliente:
+                print(f"❌ No existe cliente con ID {idcliente}")
+                self.pausa()
+                return
+            
+            print(f"\nEditando a: {cliente['nombre']} {cliente['apellidos']}")
+            print("(Deje en blanco para mantener el valor actual)")
+            print()
+            
+            nombre = input(f"Nombre [{cliente['nombre']}]: ") or cliente['nombre']
+            apellidos = input(f"Apellidos [{cliente['apellidos']}]: ") or cliente['apellidos']
+            sexo = input(f"Sexo [{cliente['sexo']}]: ").upper() or cliente['sexo']
+            fecha_nac = input(f"Fecha Nac. [{cliente['fecha_nacimiento']}]: ") or cliente['fecha_nacimiento']
+            tipo_doc = input(f"Tipo documento [{cliente['tipo_documento']}]: ").upper() or cliente['tipo_documento']
+            num_doc = input(f"Número documento [{cliente['num_documento']}]: ") or cliente['num_documento']
+            direccion = input(f"Dirección [{cliente.get('direccion', '')}]: ") or cliente.get('direccion')
+            telefono = input(f"Teléfono [{cliente.get('telefono', '')}]: ") or cliente.get('telefono')
+            email = input(f"Email [{cliente.get('email', '')}]: ") or cliente.get('email')
+            
+            if self.cliente_service.actualizar(
+                idcliente, nombre, apellidos, fecha_nac, tipo_doc, num_doc,
+                sexo, direccion, telefono, email
+            ):
+                print("✅ Cliente actualizado correctamente")
+            else:
+                print("❌ Error al actualizar el cliente")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('clientes_eliminar')
+    def _eliminar_cliente(self):
+        """Elimina un cliente"""
+        self.mostrar_cabecera("ELIMINAR CLIENTE")
+        
+        try:
+            idcliente = int(input("ID del cliente a eliminar: "))
+            
+            cliente = self.cliente_service.obtener_por_id(idcliente)
+            if not cliente:
+                print(f"❌ No existe cliente con ID {idcliente}")
+                self.pausa()
+                return
+            
+            print(f"\n¿Está seguro de eliminar a {cliente['nombre']} {cliente['apellidos']}?")
+            confirmacion = input("Esta acción no se puede deshacer (escriba 'ELIMINAR' para confirmar): ")
+            
+            if confirmacion == 'ELIMINAR':
+                if self.cliente_service.eliminar(idcliente):
+                    print("✅ Cliente eliminado correctamente")
+                else:
+                    print("❌ Error al eliminar el cliente (puede tener ventas asociadas)")
+            else:
+                print("Operación cancelada")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('articulos_ver')
+    def menu_articulos(self):
+        """Menú de gestión de artículos"""
+        while True:
+            self.mostrar_cabecera("GESTIÓN DE ARTÍCULOS")
+            print("1. Listar artículos")
+            print("2. Buscar artículo")
+            print("3. Crear artículo")
+            print("4. Editar artículo")
+            print("5. Eliminar artículo")
+            print("6. Ver stock por lote")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._listar_articulos()
+            elif opcion == '2':
+                self._buscar_articulo()
+            elif opcion == '3':
+                self._crear_articulo()
+            elif opcion == '4':
+                self._editar_articulo()
+            elif opcion == '5':
+                self._eliminar_articulo()
+            elif opcion == '6':
+                self._ver_stock_lotes()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    @requiere_permiso('articulos_ver')
+    def _listar_articulos(self):
+        """Lista todos los artículos"""
+        self.mostrar_cabecera("LISTADO DE ARTÍCULOS")
+        
+        articulos = self.articulo_service.listar()
+        
+        if not articulos:
+            print("📭 No hay artículos registrados")
+        else:
+            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'PRESENTACIÓN':<15}")
+            print("-" * 85)
+            for a in articulos:
+                print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a['categoria']:<20} {a['presentacion']:<15}")
+        
+        self.pausa()
+    
+    @requiere_permiso('articulos_crear')
+    def _crear_articulo(self):
+        """Crea un nuevo artículo"""
+        self.mostrar_cabecera("CREAR ARTÍCULO")
+        
+        # Mostrar categorías disponibles
+        categorias = self.categoria_service.listar()
+        if not categorias:
+            print("❌ No hay categorías. Cree una primero.")
+            self.pausa()
+            return
+        
+        print("Categorías disponibles:")
+        for c in categorias:
+            print(f"  {c['idcategoria']}. {c['nombre']}")
+        
+        try:
+            idcat = int(input("\nID de categoría: "))
+        except:
+            print("❌ Categoría inválida")
+            self.pausa()
+            return
+        
+        # Mostrar presentaciones
+        print("\nPresentaciones:")
+        print("  1. Unidad")
+        print("  2. Caja")
+        print("  3. Kilogramo")
+        
+        try:
+            idpres = int(input("ID de presentación: "))
+        except:
+            print("❌ Presentación inválida")
+            self.pausa()
+            return
+        
+        print()
+        codigo = input("Código del artículo: ")
+        nombre = input("Nombre del artículo: ")
+        descripcion = input("Descripción (opcional): ") or None
+        
+        if self.articulo_service.crear(codigo, nombre, idcat, idpres, descripcion):
+            print("✅ Artículo creado exitosamente")
+        else:
+            print("❌ Error al crear el artículo")
+        
+        self.pausa()
+    
+    @requiere_permiso('articulos_ver')
+    def _buscar_articulo(self):
+        """Busca un artículo por ID o código"""
+        self.mostrar_cabecera("BUSCAR ARTÍCULO")
+        
+        print("1. Buscar por ID")
+        print("2. Buscar por código")
+        opcion = input("🔹 Seleccione: ").strip()
+        
+        if opcion == '1':
+            try:
+                idart = int(input("ID del artículo: "))
+                art = self.articulo_service.obtener_por_id(idart)
+                if art:
+                    self._mostrar_detalle_articulo(art)
+                else:
+                    print(f"❌ No existe artículo con ID {idart}")
+            except:
+                print("❌ ID inválido")
+        
+        elif opcion == '2':
+            codigo = input("Código del artículo: ")
+            art = self.articulo_service.buscar_por_codigo(codigo)
+            if art:
+                # Obtener datos completos
+                art = self.articulo_service.obtener_por_id(art['idarticulo'])
+                self._mostrar_detalle_articulo(art)
+            else:
+                print(f"❌ No existe artículo con código {codigo}")
+        
+        self.pausa()
+    
+    def _mostrar_detalle_articulo(self, a):
+        """Muestra detalles completos de un artículo"""
+        print(f"\n📌 ID: {a['idarticulo']}")
+        print(f"📌 Código: {a['codigo']}")
+        print(f"📌 Nombre: {a['nombre']}")
+        print(f"📌 Categoría: {a['categoria']}")
+        print(f"📌 Presentación: {a['presentacion']}")
+        print(f"📌 Descripción: {a.get('descripcion', 'Sin descripción')}")
+    
+    @requiere_permiso('articulos_editar')
+    def _editar_articulo(self):
+        """Edita un artículo existente"""
+        self.mostrar_cabecera("EDITAR ARTÍCULO")
+        
+        try:
+            idart = int(input("ID del artículo a editar: "))
+            art = self.articulo_service.obtener_por_id(idart)
+            
+            if not art:
+                print(f"❌ No existe artículo con ID {idart}")
+                self.pausa()
+                return
+            
+            print(f"\nEditando: {art['nombre']}")
+            print("(Deje en blanco para mantener el valor actual)")
+            print()
+            
+            codigo = input(f"Código [{art['codigo']}]: ") or art['codigo']
+            nombre = input(f"Nombre [{art['nombre']}]: ") or art['nombre']
+            descripcion = input(f"Descripción [{art.get('descripcion', '')}]: ") or art.get('descripcion')
+            
+            # Mostrar categorías
+            categorias = self.categoria_service.listar()
+            print("\nCategorías disponibles:")
+            for c in categorias:
+                print(f"  {c['idcategoria']}. {c['nombre']}")
+            
+            try:
+                idcat = int(input(f"ID categoría [{art['idcategoria']}]: ") or art['idcategoria'])
+            except:
+                idcat = art['idcategoria']
+            
+            # Presentaciones
+            print("\nPresentaciones:")
+            print("  1. Unidad")
+            print("  2. Caja")
+            print("  3. Kilogramo")
+            
+            try:
+                idpres = int(input(f"ID presentación [{art['idpresentacion']}]: ") or art['idpresentacion'])
+            except:
+                idpres = art['idpresentacion']
+            
+            if self.articulo_service.actualizar(idart, codigo, nombre, idcat, idpres, descripcion):
+                print("✅ Artículo actualizado correctamente")
+            else:
+                print("❌ Error al actualizar el artículo")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('articulos_eliminar')
+    def _eliminar_articulo(self):
+        """Elimina un artículo"""
+        self.mostrar_cabecera("ELIMINAR ARTÍCULO")
+        
+        try:
+            idart = int(input("ID del artículo a eliminar: "))
+            
+            art = self.articulo_service.obtener_por_id(idart)
+            if not art:
+                print(f"❌ No existe artículo con ID {idart}")
+                self.pausa()
+                return
+            
+            print(f"\n¿Está seguro de eliminar {art['nombre']}?")
+            confirmacion = input("Esta acción no se puede deshacer (escriba 'ELIMINAR' para confirmar): ")
+            
+            if confirmacion == 'ELIMINAR':
+                if self.articulo_service.eliminar(idart):
+                    print("✅ Artículo eliminado correctamente")
+                else:
+                    print("❌ Error al eliminar el artículo (puede tener movimientos asociados)")
+            else:
+                print("Operación cancelada")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('inventario_ver')
+    def _ver_stock_lotes(self):
+        """Ver stock por lotes de un artículo"""
+        self.mostrar_cabecera("STOCK POR LOTES")
+        
+        try:
+            idart = int(input("ID del artículo: "))
+            art = self.articulo_service.obtener_por_id(idart)
+            
+            if not art:
+                print(f"❌ No existe artículo con ID {idart}")
+                self.pausa()
+                return
+            
+            print(f"\nArtículo: {art['nombre']}")
+            print("🔧 Módulo de lotes en desarrollo")
+            
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('ventas_ver')
+    def menu_ventas(self):
+        """Menú de gestión de ventas"""
+        while True:
+            self.mostrar_cabecera("GESTIÓN DE VENTAS")
+            print("1. Listar ventas")
+            print("2. Registrar venta")
+            print("3. Ver detalle de venta")
+            print("4. Anular venta")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._listar_ventas()
+            elif opcion == '2':
+                self._registrar_venta()
+            elif opcion == '3':
+                self._ver_venta()
+            elif opcion == '4':
+                self._anular_venta()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    @requiere_permiso('ventas_ver')
+    def _listar_ventas(self):
+        """Lista todas las ventas"""
+        self.mostrar_cabecera("LISTADO DE VENTAS")
+        
+        ventas = self.venta_service.listar()
+        
+        if not ventas:
+            print("📭 No hay ventas registradas")
+        else:
+            print(f"{'ID':<5} {'FECHA':<12} {'COMPROBANTE':<20} {'CLIENTE':<25} {'ESTADO':<10}")
+            print("-" * 72)
+            for v in ventas:
+                comp = f"{v['tipo_comprobante']} {v['serie']}-{v['numero_comprobante']}"
+                print(f"{v['idventa']:<5} {v['fecha']:<12} {comp:<20} {v['cliente']:<25} {v['estado']:<10}")
+        
+        self.pausa()
+    
+    @requiere_permiso('ventas_crear')
+    def _registrar_venta(self):
+        """Registra una nueva venta"""
+        self.mostrar_cabecera("REGISTRAR VENTA")
+        
+        # Seleccionar cliente
+        print("Seleccionar cliente:")
+        clientes = self.cliente_service.listar()
+        for c in clientes[:5]:  # Mostrar solo primeros 5
+            print(f"  {c['idcliente']}. {c['nombre']} {c['apellidos']}")
+        
+        try:
+            idcliente = int(input("\nID del cliente: "))
+        except:
+            print("❌ Cliente inválido")
+            self.pausa()
+            return
+        
+        # Datos de la venta
+        print("\nTipo de comprobante:")
+        print("  1. Factura")
+        print("  2. Boleta")
+        print("  3. Ticket")
+        tipo_map = {'1': 'FACTURA', '2': 'BOLETA', '3': 'TICKET'}
+        tipo_op = input("Seleccione: ").strip()
+        tipo_comprobante = tipo_map.get(tipo_op, 'BOLETA')
+        
+        serie = input("Serie (ej. F001): ")
+        numero = input("Número: ")
+        
+        # Detalle de venta
+        detalle = []
+        while True:
+            print("\n--- Agregar producto ---")
+            codigo = input("Código del artículo (0 para terminar): ")
+            if codigo == '0':
+                break
+            
+            art = self.articulo_service.buscar_por_codigo(codigo)
+            if not art:
+                print("❌ Artículo no encontrado")
+                continue
+            
+            try:
+                cantidad = int(input("Cantidad: "))
+                precio = float(input("Precio unitario: "))
+            except:
+                print("❌ Cantidad o precio inválido")
+                continue
+            
+            detalle.append({
+                'idarticulo': art['idarticulo'],
+                'cantidad': cantidad,
+                'precio_venta': precio
+            })
+            print(f"✅ {art['nombre']} agregado")
+        
+        if not detalle:
+            print("❌ Debe agregar al menos un producto")
+            self.pausa()
+            return
+        
+        # Registrar venta
+        usuario = self.trabajador_service.get_usuario_actual()
+        idventa = self.venta_service.registrar(
+            usuario['idtrabajador'], idcliente, tipo_comprobante,
+            serie, numero, 18.0, detalle
+        )
+        
+        if idventa:
+            print(f"✅ Venta {idventa} registrada correctamente")
+        else:
+            print("❌ Error al registrar la venta")
+        
+        self.pausa()
+    
+    @requiere_permiso('ventas_ver')
+    def _ver_venta(self):
+        """Muestra detalle de una venta"""
+        self.mostrar_cabecera("DETALLE DE VENTA")
+        
+        try:
+            idventa = int(input("ID de la venta: "))
+            venta = self.venta_service.obtener_por_id(idventa)
+            
+            if not venta:
+                print(f"❌ No existe venta con ID {idventa}")
+                self.pausa()
+                return
+            
+            print(f"\n📌 Venta N°: {venta['idventa']}")
+            print(f"📌 Fecha: {venta['fecha']}")
+            print(f"📌 Cliente: {venta['cliente']}")
+            print(f"📌 Comprobante: {venta['tipo_comprobante']} {venta['serie']}-{venta['numero_comprobante']}")
+            print(f"📌 IGV: {venta['igv']}%")
+            print(f"📌 Estado: {venta['estado']}")
+            print(f"📌 Trabajador: {venta['trabajador']}")
+            
+            if venta.get('detalle'):
+                print("\n📋 DETALLE:")
+                total = 0
+                for d in venta['detalle']:
+                    subtotal = d['cantidad'] * d['precio_venta']
+                    total += subtotal
+                    print(f"   - {d['articulo']} x{d['cantidad']} @ {d['precio_venta']} = {subtotal:.2f}")
+                print(f"\n💰 TOTAL: {total:.2f}")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('ventas_anular')
+    def _anular_venta(self):
+        """Anula una venta"""
+        self.mostrar_cabecera("ANULAR VENTA")
+        
+        try:
+            idventa = int(input("ID de la venta a anular: "))
+            venta = self.venta_service.obtener_por_id(idventa)
+            
+            if not venta:
+                print(f"❌ No existe venta con ID {idventa}")
+                self.pausa()
+                return
+            
+            if venta['estado'] == 'ANULADO':
+                print("⚠️ Esta venta ya está anulada")
+                self.pausa()
+                return
+            
+            print(f"\nVenta: {venta['idventa']} - {venta['fecha']}")
+            print(f"Cliente: {venta['cliente']}")
+            total = sum(d['cantidad'] * d['precio_venta'] for d in venta.get('detalle', []))
+            print(f"Total: {total:.2f}")
+            
+            confirmacion = input("\n¿Está seguro de anular esta venta? (s/N): ").lower()
+            if confirmacion == 's':
+                if self.venta_service.anular(idventa):
+                    print("✅ Venta anulada correctamente")
+                else:
+                    print("❌ Error al anular la venta")
+            else:
+                print("Operación cancelada")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
     def run(self):
         """Ejecuta el sistema"""
         if not self.conectar_db():
@@ -591,21 +1292,40 @@ class SistemaVentas:
             opcion = self.mostrar_menu_principal()
             
             if opcion == '1':
-                self.menu_categorias()
+                if self.rol_service.tiene_permiso('clientes_ver'):
+                    self.menu_clientes()
+                else:
+                    print("❌ No tiene permisos para acceder a clientes")
+                    self.pausa()
             elif opcion == '2':
-                print("🔧 Módulo de artículos en desarrollo")
-                self.pausa()
+                if self.rol_service.tiene_permiso('articulos_ver'):
+                    self.menu_articulos()
+                else:
+                    print("❌ No tiene permisos para acceder a artículos")
+                    self.pausa()
             elif opcion == '3':
-                print("🔧 Módulo de proveedores en desarrollo")
+                if self.rol_service.tiene_permiso('proveedores_ver'):
+                    print("🔧 Módulo de proveedores en desarrollo")
+                else:
+                    print("❌ No tiene permisos para acceder a proveedores")
                 self.pausa()
             elif opcion == '4':
-                print("🔧 Módulo de ventas en desarrollo")
-                self.pausa()
+                if self.rol_service.tiene_permiso('ventas_ver'):
+                    self.menu_ventas()
+                else:
+                    print("❌ No tiene permisos para acceder a ventas")
+                    self.pausa()
             elif opcion == '5':
-                print("🔧 Módulo de inventario en desarrollo")
+                if self.rol_service.tiene_permiso('inventario_ver'):
+                    print("🔧 Módulo de inventario en desarrollo")
+                else:
+                    print("❌ No tiene permisos para acceder a inventario")
                 self.pausa()
             elif opcion == '6':
-                print("🔧 Módulo de reportes en desarrollo")
+                if self.rol_service.tiene_permiso('reportes_ventas'):
+                    print("🔧 Módulo de reportes en desarrollo")
+                else:
+                    print("❌ No tiene permisos para acceder a reportes")
                 self.pausa()
             elif opcion == '7':
                 if self.trabajador_service.get_usuario_actual() and self.rol_service.tiene_permiso('usuarios_ver'):

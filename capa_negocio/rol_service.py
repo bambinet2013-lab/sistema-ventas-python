@@ -35,6 +35,14 @@ class RolService(BaseService):
         """Lista roles disponibles"""
         return self.repositorio.listar_roles()
     
+    def obtener_rol(self, idrol: int) -> Optional[Dict]:
+        """Obtiene un rol por su ID"""
+        try:
+            return self.repositorio.obtener_rol(idrol)
+        except Exception as e:
+            logger.error(f"❌ Error al obtener rol {idrol}: {e}")
+            return None
+    
     def listar_permisos_por_modulo(self) -> Dict[str, List[Dict]]:
         """Lista permisos agrupados por módulo"""
         todos = self.repositorio.listar_permisos()
