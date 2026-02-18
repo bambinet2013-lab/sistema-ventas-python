@@ -20,6 +20,7 @@ from capa_datos.ingreso_repo import IngresoRepositorio
 from capa_datos.lote_repo import LoteRepositorio
 from capa_datos.rol_repo import RolRepositorio
 from capa_datos.usuario_admin_repo import UsuarioAdminRepositorio
+from capa_datos.proveedor_archivo_repo import ProveedorArchivoRepositorio
 
 from capa_negocio.categoria_service import CategoriaService
 from capa_negocio.cliente_service import ClienteService
@@ -31,6 +32,11 @@ from capa_negocio.base_service import BaseService
 from capa_negocio.email_service import EmailService
 from capa_negocio.usuario_admin_service import UsuarioAdminService
 from capa_negocio.token_service import TokenService
+from capa_negocio.proveedor_service import ProveedorService
+from capa_negocio.validacion_venezuela import ValidacionVenezuela
+from capa_negocio.inventario_service import InventarioService
+from capa_negocio.ingreso_service import IngresoService
+from capa_negocio.proveedor_archivo_service import ProveedorArchivoService
 
 from capa_presentacion.decoradores import requiere_permiso
 
@@ -50,11 +56,15 @@ class SistemaVentas:
         self.categoria_service = None
         self.cliente_service = None
         self.articulo_service = None
+        self.proveedor_service = None
+        self.proveedor_archivo_service = None
         self.venta_service = None
         self.rol_service = None
         self.email_service = None
         self.usuario_admin_service = None
         self.token_service = None
+        self.inventario_service = None
+        self.ingreso_service = None
     
     def conectar_db(self):
         """Establece conexión con la base de datos"""
@@ -68,20 +78,31 @@ class SistemaVentas:
         categoria_repo = CategoriaRepositorio(self.conn)
         cliente_repo = ClienteRepositorio(self.conn)
         articulo_repo = ArticuloRepositorio(self.conn)
+        proveedor_repo = ProveedorRepositorio(self.conn)
         venta_repo = VentaRepositorio(self.conn)
+        ingreso_repo = IngresoRepositorio(self.conn)
         rol_repo = RolRepositorio(self.conn)
         usuario_admin_repo = UsuarioAdminRepositorio(self.conn)
+        proveedor_archivo_repo = ProveedorArchivoRepositorio(self.conn)
         
         # Inicializar servicios
         self.trabajador_service = TrabajadorService(trabajador_repo)
         self.categoria_service = CategoriaService(categoria_repo)
         self.cliente_service = ClienteService(cliente_repo)
         self.articulo_service = ArticuloService(articulo_repo, self.categoria_service)
+        self.proveedor_service = ProveedorService(proveedor_repo)
+        self.proveedor_archivo_service = ProveedorArchivoService(proveedor_archivo_repo, self.proveedor_service)
         self.venta_service = VentaService(
             venta_repo, 
             self.cliente_service, 
             self.trabajador_service, 
             self.articulo_service
+        )
+        self.ingreso_service = IngresoService(
+            ingreso_repo, 
+            self.articulo_service, 
+            self.proveedor_service,
+            self.trabajador_service
         )
         self.rol_service = RolService(rol_repo)
         self.usuario_admin_service = UsuarioAdminService(usuario_admin_repo, self.rol_service)
@@ -90,12 +111,15 @@ class SistemaVentas:
         # Asignar rol_service a trabajador_service
         self.trabajador_service.rol_service = self.rol_service
         
+        # Inicializar servicio de inventario
+        self.inventario_service = InventarioService(self.articulo_service)
+        
         # Inicializar servicio de email
         self.email_service = EmailService(
             smtp_server="smtp.gmail.com",
             smtp_port=587,
-            email_remitente="carlosberenguel554@gmail.com",  # ← CAMBIA ESTO
-            password="fhnh tiax mfus fmok"  # ← CAMBIA ESTO
+            email_remitente="carlosberenguel554@gmail.com",
+            password="fhnh tiax mfus fmok"
         )
         
         return True
@@ -352,12 +376,18 @@ class SistemaVentas:
             print("-" * 90)
             for u in usuarios:
                 rol = u.get('rol_nombre') or f"Rol {u['idrol']}"
-                print(f"{u['idtrabajador']:<5} {u['usuario']:<15} {u['nombre'] + ' ' + u['apellidos']:<25} {u['email']:<30} {rol:<15}")
+                
+                # Manejar valores None
+                email_val = u.get('email', '')
+                if email_val is None:
+                    email_val = ''
+                
+                print(f"{u['idtrabajador']:<5} {u['usuario']:<15} {u['nombre'] + ' ' + u['apellidos']:<25} {email_val:<30} {rol:<15}")
         
         self.pausa()
     
     def _crear_usuario(self):
-        """Crea un nuevo usuario"""
+        """Crea un nuevo usuario del sistema (trabajador) con validación venezolana"""
         self.mostrar_cabecera("CREAR NUEVO USUARIO")
         
         print("📝 Complete los datos del nuevo usuario:")
@@ -367,7 +397,61 @@ class SistemaVentas:
         apellidos = input("Apellidos: ")
         sexo = input("Sexo (M/F/O): ").upper()
         fecha_nac = input("Fecha de nacimiento (YYYY-MM-DD): ")
-        num_doc = input("Número de documento: ")
+        
+        # Selección de tipo de documento para el usuario
+        print("\n" + "="*60)
+        print("🔍 TIPO DE DOCUMENTO DEL USUARIO")
+        print("="*60)
+        print("1. 🇻🇪 Venezolano (V) → V12345678")
+        print("   (Letra V + 8 dígitos de cédula)")
+        print("-"*60)
+        print("2. 🌎 Extranjero (E) → E87654321")
+        print("   (Letra E + 8 dígitos de cédula)")
+        print("-"*60)
+        print("3. 🛂 Pasaporte → número de pasaporte")
+        print("   (6-12 caracteres, sin letra especial)")
+        print("="*60)
+        
+        tipo_persona = input("Seleccione tipo de documento (1-3): ").strip()
+        
+        if tipo_persona == '1':
+            tipo_doc = 'V'
+            print("\n✅ Seleccionó: Venezolano (V)")
+            print("📝 Formato requerido: V + 8 dígitos")
+            print("   Ejemplo: V12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('V'):
+                print("❌ El documento debe comenzar con 'V'")
+                self.pausa()
+                return
+            documento_completo = num_doc  # Guardamos completo (V12345678)
+            
+        elif tipo_persona == '2':
+            tipo_doc = 'E'
+            print("\n✅ Seleccionó: Extranjero (E)")
+            print("📝 Formato requerido: E + 8 dígitos")
+            print("   Ejemplo: E87654321")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('E'):
+                print("❌ El documento debe comenzar con 'E'")
+                self.pausa()
+                return
+            documento_completo = num_doc  # Guardamos completo (E87654321)
+            
+        elif tipo_persona == '3':
+            tipo_doc = 'PASAPORTE'
+            print("\n✅ Seleccionó: Pasaporte")
+            print("📝 Ingrese número de pasaporte (6-12 caracteres)")
+            print("   Ejemplo: ABC123456")
+            documento_completo = input("Pasaporte: ").upper()
+            
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
+        
         usuario = input("Nombre de usuario: ")
         password = input("Contraseña (mínimo 6 caracteres): ")
         email = input("Email: ")
@@ -388,12 +472,12 @@ class SistemaVentas:
             return
         
         if self.usuario_admin_service.crear_usuario(
-            nombre, apellidos, sexo, fecha_nac, num_doc,
+            nombre, apellidos, sexo, fecha_nac, documento_completo,
             usuario, password, email, idrol, direccion, telefono
         ):
-            print("✅ Usuario creado exitosamente")
+            print("\n✅ Usuario creado exitosamente")
         else:
-            print("❌ Error al crear el usuario")
+            print("\n❌ Error al crear el usuario")
         
         self.pausa()
     
@@ -444,7 +528,7 @@ class SistemaVentas:
             apellidos = input(f"Apellidos [{usuario['apellidos']}]: ") or usuario['apellidos']
             sexo = input(f"Sexo [{usuario['sexo']}]: ").upper() or usuario['sexo']
             fecha_nac = input(f"Fecha Nac. [{usuario['fecha_nacimiento']}]: ") or usuario['fecha_nacimiento']
-            num_doc = input(f"Documento [{usuario['num_documento']}]: ") or usuario['num_documento']
+            documento = input(f"Documento [{usuario['num_documento']}]: ") or usuario['num_documento']
             username = input(f"Usuario [{usuario['usuario']}]: ") or usuario['usuario']
             email = input(f"Email [{usuario['email']}]: ") or usuario['email']
             telefono = input(f"Teléfono [{usuario.get('telefono', '')}]: ") or usuario.get('telefono')
@@ -473,7 +557,7 @@ class SistemaVentas:
                 idrol = usuario['idrol']
             
             if self.usuario_admin_service.actualizar_usuario(
-                iduser, nombre, apellidos, sexo, fecha_nac, num_doc,
+                iduser, nombre, apellidos, sexo, fecha_nac, documento,
                 username, email, idrol, direccion, telefono, nueva_pass
             ):
                 print("✅ Usuario actualizado correctamente")
@@ -691,17 +775,28 @@ class SistemaVentas:
         if not clientes:
             print("📭 No hay clientes registrados")
         else:
-            print(f"{'ID':<5} {'NOMBRE':<25} {'DOCUMENTO':<15} {'TELÉFONO':<12} {'EMAIL':<25}")
-            print("-" * 82)
+            print(f"{'ID':<5} {'NOMBRE':<25} {'DOCUMENTO':<20} {'TELÉFONO':<12} {'EMAIL':<25}")
+            print("-" * 87)
             for c in clientes:
                 nombre_completo = f"{c['nombre']} {c['apellidos']}"
-                print(f"{c['idcliente']:<5} {nombre_completo:<25} {c['num_documento']:<15} {c.get('telefono', ''):<12} {c.get('email', ''):<25}")
+                documento = f"{c['tipo_documento']}-{c['num_documento']}"
+                
+                # Manejar valores None
+                telefono_val = c.get('telefono', '')
+                if telefono_val is None:
+                    telefono_val = ''
+                    
+                email_val = c.get('email', '')
+                if email_val is None:
+                    email_val = ''
+                
+                print(f"{c['idcliente']:<5} {nombre_completo:<25} {documento:<20} {telefono_val:<12} {email_val:<25}")
         
         self.pausa()
     
     @requiere_permiso('clientes_crear')
     def _crear_cliente(self):
-        """Crea un nuevo cliente"""
+        """Crea un nuevo cliente con validación venezolana"""
         self.mostrar_cabecera("CREAR CLIENTE")
         
         print("📝 Complete los datos del cliente:")
@@ -711,9 +806,110 @@ class SistemaVentas:
         apellidos = input("Apellidos: ")
         sexo = input("Sexo (M/F/O): ").upper()
         fecha_nac = input("Fecha de nacimiento (YYYY-MM-DD): ")
-        tipo_doc = input("Tipo de documento (DNI/RUC/PASAPORTE): ").upper()
-        num_doc = input("Número de documento: ")
-        direccion = input("Dirección (opcional): ") or None
+        
+        # Selección de tipo de persona
+        print("\n" + "="*60)
+        print("🔍 TIPO DE PERSONA - FORMATO DEL DOCUMENTO")
+        print("="*60)
+        print("1. 🇻🇪 Persona Natural Venezolana  →  V12345678")
+        print("   (Letra V + 8 dígitos de cédula)")
+        print("-"*60)
+        print("2. 🌎 Persona Natural Extranjera   →  E87654321")
+        print("   (Letra E + 8 dígitos de cédula)")
+        print("-"*60)
+        print("3. 🏢 Persona Jurídica (Empresa)   →  J12345678")
+        print("   (Letra J + 8 dígitos de RIF)")
+        print("-"*60)
+        print("4. 🏛️ Gobierno / Institución        →  G12345678")
+        print("   (Letra G + 8 dígitos de RIF)")
+        print("-"*60)
+        print("5. 👥 Consejo Comunal               →  C12345678")
+        print("   (Letra C + 8 dígitos de RIF)")
+        print("-"*60)
+        print("6. 🛂 Pasaporte                      →  Número de pasaporte")
+        print("   (6-12 caracteres, sin letra especial)")
+        print("="*60)
+        
+        tipo_persona = input("Seleccione tipo de persona (1-6): ").strip()
+        
+        if tipo_persona == '1':
+            tipo_doc = 'V'
+            print("\n✅ Seleccionó: Persona Natural Venezolana (V)")
+            print("📝 Formato requerido: V + 8 dígitos")
+            print("   Ejemplo: V12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('V'):
+                print("❌ El documento debe comenzar con 'V'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la V para guardar solo números
+            
+        elif tipo_persona == '2':
+            tipo_doc = 'E'
+            print("\n✅ Seleccionó: Persona Natural Extranjera (E)")
+            print("📝 Formato requerido: E + 8 dígitos")
+            print("   Ejemplo: E87654321")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('E'):
+                print("❌ El documento debe comenzar con 'E'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la E
+            
+        elif tipo_persona == '3':
+            tipo_doc = 'J'
+            print("\n✅ Seleccionó: Empresa (J)")
+            print("📝 Formato requerido: J + 8 dígitos")
+            print("   Ejemplo: J12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('J'):
+                print("❌ El documento debe comenzar con 'J'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la J
+            
+        elif tipo_persona == '4':
+            tipo_doc = 'G'
+            print("\n✅ Seleccionó: Gobierno / Institución (G)")
+            print("📝 Formato requerido: G + 8 dígitos")
+            print("   Ejemplo: G12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('G'):
+                print("❌ El documento debe comenzar con 'G'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la G
+            
+        elif tipo_persona == '5':
+            tipo_doc = 'C'
+            print("\n✅ Seleccionó: Consejo Comunal (C)")
+            print("📝 Formato requerido: C + 8 dígitos")
+            print("   Ejemplo: C12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('C'):
+                print("❌ El documento debe comenzar con 'C'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la C
+            
+        elif tipo_persona == '6':
+            tipo_doc = 'PASAPORTE'
+            print("\n✅ Seleccionó: Pasaporte")
+            print("📝 Ingrese número de pasaporte (6-12 caracteres)")
+            print("   Ejemplo: ABC123456")
+            num_doc = input("Pasaporte: ").upper()
+            
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
+        
+        direccion = input("\nDirección (opcional): ") or None
         telefono = input("Teléfono (opcional): ") or None
         email = input("Email (opcional): ") or None
         
@@ -721,9 +917,9 @@ class SistemaVentas:
             nombre, apellidos, fecha_nac, tipo_doc, num_doc,
             sexo, direccion, telefono, email
         ):
-            print("✅ Cliente creado exitosamente")
+            print("\n✅ Cliente creado exitosamente")
         else:
-            print("❌ Error al crear el cliente")
+            print("\n❌ Error al crear el cliente")
         
         self.pausa()
     
@@ -748,14 +944,24 @@ class SistemaVentas:
                 print("❌ ID inválido")
         
         elif opcion == '2':
-            doc = input("Número de documento: ")
-            cliente = self.cliente_service.buscar_por_documento(doc)
-            if cliente:
-                # Obtener datos completos
-                cliente = self.cliente_service.obtener_por_id(cliente['idcliente'])
-                self._mostrar_detalle_cliente(cliente)
+            doc = input("Número de documento (ej: V12345678): ").upper()
+            # Extraer tipo y número
+            if doc and doc[0] in ['V', 'E', 'J', 'G', 'C']:
+                tipo = doc[0]
+                numero = doc[1:]
+                # Buscar por tipo y número
+                clientes = self.cliente_service.listar()
+                encontrado = None
+                for c in clientes:
+                    if c['tipo_documento'] == tipo and c['num_documento'] == numero:
+                        encontrado = c
+                        break
+                if encontrado:
+                    self._mostrar_detalle_cliente(encontrado)
+                else:
+                    print(f"❌ No existe cliente con documento {doc}")
             else:
-                print(f"❌ No existe cliente con documento {doc}")
+                print("❌ Formato de documento inválido")
         
         self.pausa()
     
@@ -765,7 +971,7 @@ class SistemaVentas:
         print(f"📌 Nombre: {c['nombre']} {c['apellidos']}")
         print(f"📌 Sexo: {c.get('sexo', 'No especificado')}")
         print(f"📌 Fecha Nac.: {c['fecha_nacimiento']}")
-        print(f"📌 Documento: {c['tipo_documento']} - {c['num_documento']}")
+        print(f"📌 Documento: {c['tipo_documento']}-{c['num_documento']}")
         print(f"📌 Dirección: {c.get('direccion', 'No registrada')}")
         print(f"📌 Teléfono: {c.get('telefono', 'No registrado')}")
         print(f"📌 Email: {c.get('email', 'No registrado')}")
@@ -784,7 +990,25 @@ class SistemaVentas:
                 self.pausa()
                 return
             
+            # Mostrar tipo actual con emoji
+            tipo_actual = cliente['tipo_documento']
+            if tipo_actual == 'V':
+                tipo_texto = "🇻🇪 Persona Natural Venezolana"
+            elif tipo_actual == 'E':
+                tipo_texto = "🌎 Persona Natural Extranjera"
+            elif tipo_actual == 'J':
+                tipo_texto = "🏢 Empresa"
+            elif tipo_actual == 'G':
+                tipo_texto = "🏛️ Gobierno / Institución"
+            elif tipo_actual == 'C':
+                tipo_texto = "👥 Consejo Comunal"
+            elif tipo_actual == 'PASAPORTE':
+                tipo_texto = "🛂 Pasaporte"
+            else:
+                tipo_texto = tipo_actual
+            
             print(f"\nEditando a: {cliente['nombre']} {cliente['apellidos']}")
+            print(f"📌 Tipo actual: {tipo_texto}")
             print("(Deje en blanco para mantener el valor actual)")
             print()
             
@@ -792,8 +1016,86 @@ class SistemaVentas:
             apellidos = input(f"Apellidos [{cliente['apellidos']}]: ") or cliente['apellidos']
             sexo = input(f"Sexo [{cliente['sexo']}]: ").upper() or cliente['sexo']
             fecha_nac = input(f"Fecha Nac. [{cliente['fecha_nacimiento']}]: ") or cliente['fecha_nacimiento']
-            tipo_doc = input(f"Tipo documento [{cliente['tipo_documento']}]: ").upper() or cliente['tipo_documento']
-            num_doc = input(f"Número documento [{cliente['num_documento']}]: ") or cliente['num_documento']
+            
+            print("\n¿Cambiar tipo de documento? (s/N): ", end="")
+            cambiar_tipo = input().lower()
+            
+            if cambiar_tipo == 's':
+                # Similar a la creación
+                print("\n" + "="*60)
+                print("🔍 NUEVO TIPO DE DOCUMENTO")
+                print("="*60)
+                print("1. 🇻🇪 Venezolano (V) → V12345678")
+                print("2. 🌎 Extranjero (E) → E87654321")
+                print("3. 🏢 Empresa (J) → J12345678")
+                print("4. 🏛️ Gobierno (G) → G12345678")
+                print("5. 👥 Consejo Comunal (C) → C12345678")
+                print("6. 🛂 Pasaporte → texto libre")
+                print("="*60)
+                
+                tipo_op = input("Seleccione nuevo tipo (1-6): ").strip()
+                
+                if tipo_op == '1':
+                    tipo_doc = 'V'
+                    print("Ingrese documento completo (ej: V12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('V'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con V")
+                        self.pausa()
+                        return
+                elif tipo_op == '2':
+                    tipo_doc = 'E'
+                    print("Ingrese documento completo (ej: E87654321):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('E'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con E")
+                        self.pausa()
+                        return
+                elif tipo_op == '3':
+                    tipo_doc = 'J'
+                    print("Ingrese documento completo (ej: J12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('J'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con J")
+                        self.pausa()
+                        return
+                elif tipo_op == '4':
+                    tipo_doc = 'G'
+                    print("Ingrese documento completo (ej: G12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('G'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con G")
+                        self.pausa()
+                        return
+                elif tipo_op == '5':
+                    tipo_doc = 'C'
+                    print("Ingrese documento completo (ej: C12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('C'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con C")
+                        self.pausa()
+                        return
+                elif tipo_op == '6':
+                    tipo_doc = 'PASAPORTE'
+                    num_doc = input("Número de pasaporte: ").upper()
+                else:
+                    print("❌ Opción no válida")
+                    self.pausa()
+                    return
+            else:
+                tipo_doc = cliente['tipo_documento']
+                num_doc = cliente['num_documento']
+            
             direccion = input(f"Dirección [{cliente.get('direccion', '')}]: ") or cliente.get('direccion')
             telefono = input(f"Teléfono [{cliente.get('telefono', '')}]: ") or cliente.get('telefono')
             email = input(f"Email [{cliente.get('email', '')}]: ") or cliente.get('email')
@@ -802,9 +1104,9 @@ class SistemaVentas:
                 idcliente, nombre, apellidos, fecha_nac, tipo_doc, num_doc,
                 sexo, direccion, telefono, email
             ):
-                print("✅ Cliente actualizado correctamente")
+                print("\n✅ Cliente actualizado correctamente")
             else:
-                print("❌ Error al actualizar el cliente")
+                print("\n❌ Error al actualizar el cliente")
         
         except Exception as e:
             print(f"❌ Error: {e}")
@@ -877,18 +1179,21 @@ class SistemaVentas:
     
     @requiere_permiso('articulos_ver')
     def _listar_articulos(self):
-        """Lista todos los artículos"""
+        """Lista todos los artículos con su stock actual"""
         self.mostrar_cabecera("LISTADO DE ARTÍCULOS")
         
-        articulos = self.articulo_service.listar()
+        articulos_con_stock = self.inventario_service.listar_con_stock()
         
-        if not articulos:
+        if not articulos_con_stock:
             print("📭 No hay artículos registrados")
         else:
-            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'PRESENTACIÓN':<15}")
-            print("-" * 85)
-            for a in articulos:
-                print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a['categoria']:<20} {a['presentacion']:<15}")
+            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'STOCK':<10} {'ESTADO':<10}")
+            print("-" * 90)
+            for a in articulos_con_stock:
+                stock_str = f"{a['stock_actual']} und"
+                estado = f"{a['emoji']}"
+                linea = f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a['categoria']:<20} {stock_str:<10} {estado:<10}"
+                print(f"{a['color']}{linea}{self.inventario_service.COLOR_RESET}")
         
         self.pausa()
     
@@ -977,8 +1282,8 @@ class SistemaVentas:
         print(f"\n📌 ID: {a['idarticulo']}")
         print(f"📌 Código: {a['codigo']}")
         print(f"📌 Nombre: {a['nombre']}")
-        print(f"📌 Categoría: {a['categoria']}")
-        print(f"📌 Presentación: {a['presentacion']}")
+        print(f"📌 Categoría: {a.get('categoria', 'N/A')}")
+        print(f"📌 Presentación: {a.get('presentacion', 'N/A')}")
         print(f"📌 Descripción: {a.get('descripcion', 'Sin descripción')}")
     
     @requiere_permiso('articulos_editar')
@@ -1080,6 +1385,11 @@ class SistemaVentas:
                 return
             
             print(f"\nArtículo: {art['nombre']}")
+            stock = self.inventario_service.obtener_stock_articulo(idart)
+            nivel = self.inventario_service.obtener_nivel_stock(stock)
+            
+            print(f"Stock total: {stock} unidades")
+            print(f"Estado: {nivel['color']}{nivel['emoji']} {nivel['nivel']}{self.inventario_service.COLOR_RESET}")
             print("🔧 Módulo de lotes en desarrollo")
             
         except Exception as e:
@@ -1142,7 +1452,9 @@ class SistemaVentas:
         print("Seleccionar cliente:")
         clientes = self.cliente_service.listar()
         for c in clientes[:5]:  # Mostrar solo primeros 5
-            print(f"  {c['idcliente']}. {c['nombre']} {c['apellidos']}")
+            nombre_completo = f"{c['nombre']} {c['apellidos']}"
+            documento = f"{c['tipo_documento']}-{c['num_documento']}"
+            print(f"  {c['idcliente']}. {nombre_completo} ({documento})")
         
         try:
             idcliente = int(input("\nID del cliente: "))
@@ -1167,17 +1479,42 @@ class SistemaVentas:
         detalle = []
         while True:
             print("\n--- Agregar producto ---")
-            codigo = input("Código del artículo (0 para terminar): ")
+            codigo = input("Código del artículo (0 para terminar, '?' para ver lista): ")
+            
             if codigo == '0':
                 break
+            elif codigo == '?':
+                # Mostrar lista de artículos
+                articulos = self.articulo_service.listar()
+                print("\n📋 ARTÍCULOS DISPONIBLES:")
+                print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'STOCK':<10}")
+                print("-" * 60)
+                for a in articulos:
+                    stock = self.inventario_service.obtener_stock_articulo(a['idarticulo'])
+                    print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {stock} und")
+                continue
             
             art = self.articulo_service.buscar_por_codigo(codigo)
             if not art:
-                print("❌ Artículo no encontrado")
+                try:
+                    idart = int(codigo)
+                    art = self.articulo_service.obtener_por_id(idart)
+                except:
+                    pass
+            
+            if not art:
+                print("❌ Artículo no encontrado. Use '?' para ver la lista.")
                 continue
+            
+            # Verificar stock
+            stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
+            print(f"📌 Artículo: {art['nombre']} - Stock disponible: {stock} unidades")
             
             try:
                 cantidad = int(input("Cantidad: "))
+                if cantidad > stock:
+                    print(f"❌ Stock insuficiente. Solo hay {stock} unidades")
+                    continue
                 precio = float(input("Precio unitario: "))
             except:
                 print("❌ Cantidad o precio inválido")
@@ -1283,6 +1620,931 @@ class SistemaVentas:
         
         self.pausa()
     
+    @requiere_permiso('proveedores_ver')
+    def menu_proveedores(self):
+        """Menú de gestión de proveedores (archivos opcionales)"""
+        while True:
+            self.mostrar_cabecera("GESTIÓN DE PROVEEDORES")
+            print("1. Listar proveedores")
+            print("2. Buscar proveedor")
+            print("3. Crear proveedor")
+            print("4. Editar proveedor")
+            print("5. Eliminar proveedor")
+            print("6. 📁 Ver todos los archivos de proveedores")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._listar_proveedores()
+            elif opcion == '2':
+                self._buscar_proveedor()
+            elif opcion == '3':
+                self._crear_proveedor()
+            elif opcion == '4':
+                self._editar_proveedor()
+            elif opcion == '5':
+                self._eliminar_proveedor()
+            elif opcion == '6':
+                self._listar_todos_archivos()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    @requiere_permiso('proveedores_crear')
+    def _crear_proveedor(self):
+        """Crea un nuevo proveedor con validación venezolana"""
+        self.mostrar_cabecera("CREAR PROVEEDOR")
+        
+        print("📝 Complete los datos del proveedor:")
+        print()
+        
+        razon_social = input("Razón Social / Nombre: ")
+        sector = input("Sector Comercial: ")
+        
+        # Selección de tipo de persona
+        print("\n" + "="*60)
+        print("🔍 TIPO DE PERSONA - FORMATO DEL DOCUMENTO")
+        print("="*60)
+        print("1. 🇻🇪 Persona Natural Venezolana  →  V12345678")
+        print("   (Letra V + 8 dígitos de cédula)")
+        print("-"*60)
+        print("2. 🌎 Persona Natural Extranjera   →  E87654321")
+        print("   (Letra E + 8 dígitos de cédula)")
+        print("-"*60)
+        print("3. 🏢 Persona Jurídica (Empresa)   →  J12345678")
+        print("   (Letra J + 8 dígitos de RIF)")
+        print("-"*60)
+        print("4. 🏛️ Gobierno / Institución        →  G12345678")
+        print("   (Letra G + 8 dígitos de RIF)")
+        print("-"*60)
+        print("5. 👥 Consejo Comunal               →  C12345678")
+        print("   (Letra C + 8 dígitos de RIF)")
+        print("-"*60)
+        print("6. 🛂 Pasaporte                      →  Número de pasaporte")
+        print("   (6-12 caracteres, sin letra especial)")
+        print("="*60)
+        
+        tipo_persona = input("Seleccione tipo de persona (1-6): ").strip()
+        
+        if tipo_persona == '1':
+            tipo_doc = 'V'
+            print("\n✅ Seleccionó: Persona Natural Venezolana (V)")
+            print("📝 Formato requerido: V + 8 dígitos")
+            print("   Ejemplo: V12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('V'):
+                print("❌ El documento debe comenzar con 'V'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la V para guardar solo números
+            
+        elif tipo_persona == '2':
+            tipo_doc = 'E'
+            print("\n✅ Seleccionó: Persona Natural Extranjera (E)")
+            print("📝 Formato requerido: E + 8 dígitos")
+            print("   Ejemplo: E87654321")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('E'):
+                print("❌ El documento debe comenzar con 'E'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la E
+            
+        elif tipo_persona == '3':
+            tipo_doc = 'J'
+            print("\n✅ Seleccionó: Empresa (J)")
+            print("📝 Formato requerido: J + 8 dígitos")
+            print("   Ejemplo: J12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('J'):
+                print("❌ El documento debe comenzar con 'J'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la J
+            
+        elif tipo_persona == '4':
+            tipo_doc = 'G'
+            print("\n✅ Seleccionó: Gobierno / Institución (G)")
+            print("📝 Formato requerido: G + 8 dígitos")
+            print("   Ejemplo: G12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('G'):
+                print("❌ El documento debe comenzar con 'G'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la G
+            
+        elif tipo_persona == '5':
+            tipo_doc = 'C'
+            print("\n✅ Seleccionó: Consejo Comunal (C)")
+            print("📝 Formato requerido: C + 8 dígitos")
+            print("   Ejemplo: C12345678")
+            num_doc = input("Documento completo: ").upper()
+            
+            if not num_doc.startswith('C'):
+                print("❌ El documento debe comenzar con 'C'")
+                self.pausa()
+                return
+            num_doc = num_doc[1:]  # Quitar la C
+            
+        elif tipo_persona == '6':
+            tipo_doc = 'PASAPORTE'
+            print("\n✅ Seleccionó: Pasaporte")
+            print("📝 Ingrese número de pasaporte (6-12 caracteres)")
+            print("   Ejemplo: ABC123456")
+            num_doc = input("Pasaporte: ").upper()
+            
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
+        
+        # Datos opcionales
+        direccion = input("\nDirección (opcional): ") or None
+        telefono = input("Teléfono (opcional): ") or None
+        email = input("Email (opcional): ") or None
+        url = input("URL (opcional): ") or None
+        
+        if self.proveedor_service.crear(
+            razon_social, sector, tipo_doc, num_doc,
+            direccion, telefono, email, url
+        ):
+            print("\n✅ Proveedor creado exitosamente")
+        else:
+            print("\n❌ Error al crear el proveedor")
+        
+        self.pausa()
+    
+    @requiere_permiso('proveedores_ver')
+    def _listar_proveedores(self):
+        """Lista todos los proveedores con indicador de archivos"""
+        self.mostrar_cabecera("LISTADO DE PROVEEDORES")
+        
+        proveedores = self.proveedor_service.listar()
+        
+        if not proveedores:
+            print("📭 No hay proveedores registrados")
+        else:
+            print(f"{'ID':<5} {'RAZÓN SOCIAL':<30} {'DOCUMENTO':<20} {'TELÉFONO':<15} {'ARCHIVOS':<10}")
+            print("-" * 80)
+            for p in proveedores:
+                archivos = self.proveedor_archivo_service.listar_archivos_proveedor(p['idproveedor'])
+                tiene_archivos = "📁" if archivos else ""
+                
+                documento = f"{p['tipo_documento']}-{p['num_documento']}"
+                telefono_val = p.get('telefono', '') or ''
+                
+                print(f"{p['idproveedor']:<5} {p['razon_social']:<30} {documento:<20} {telefono_val:<15} {tiene_archivos:<10}")
+        
+        self.pausa()
+    
+    @requiere_permiso('proveedores_ver')
+    def _buscar_proveedor(self):
+        """Busca un proveedor por ID o documento"""
+        self.mostrar_cabecera("BUSCAR PROVEEDOR")
+        
+        print("1. Buscar por ID")
+        print("2. Buscar por documento")
+        opcion = input("🔹 Seleccione: ").strip()
+        
+        if opcion == '1':
+            try:
+                idprov = int(input("ID del proveedor: "))
+                proveedor = self.proveedor_service.obtener_por_id(idprov)
+                if proveedor:
+                    self._mostrar_detalle_proveedor(proveedor)
+                else:
+                    print(f"❌ No existe proveedor con ID {idprov}")
+            except:
+                print("❌ ID inválido")
+        
+        elif opcion == '2':
+            doc = input("Número de documento (ej: J12345678): ").upper()
+            if doc and doc[0] in ['V', 'E', 'J', 'G', 'C']:
+                tipo = doc[0]
+                numero = doc[1:]
+                proveedores = self.proveedor_service.listar()
+                encontrado = None
+                for p in proveedores:
+                    if p['tipo_documento'] == tipo and p['num_documento'] == numero:
+                        encontrado = p
+                        break
+                if encontrado:
+                    self._mostrar_detalle_proveedor(encontrado)
+                else:
+                    print(f"❌ No existe proveedor con documento {doc}")
+            else:
+                print("❌ Formato de documento inválido")
+        
+        self.pausa()
+    
+    def _mostrar_detalle_proveedor(self, p):
+        """Muestra detalles completos de un proveedor con sus archivos"""
+        print(f"\n📌 ID: {p['idproveedor']}")
+        print(f"📌 Razón Social: {p['razon_social']}")
+        print(f"📌 Sector Comercial: {p.get('sector_comercial', 'No especificado')}")
+        print(f"📌 Documento: {p['tipo_documento']}-{p['num_documento']}")
+        print(f"📌 Dirección: {p.get('direccion', 'No registrada')}")
+        print(f"📌 Teléfono: {p.get('telefono', 'No registrado')}")
+        print(f"📌 Email: {p.get('email', 'No registrado')}")
+        print(f"📌 URL: {p.get('url', 'No registrada')}")
+        
+        archivos = self.proveedor_archivo_service.listar_archivos_proveedor(p['idproveedor'])
+        if archivos:
+            print(f"\n📁 ARCHIVOS ASOCIADOS ({len(archivos)}):")
+            for a in archivos:
+                tamano = self.proveedor_archivo_service.obtener_tamano_legible(a['tamano'])
+                print(f"   - {a['nombre_archivo']} ({tamano})")
+            print("   (Use opción 6 en menú de proveedores para gestionar)")
+        else:
+            print("\n📁 No hay archivos asociados")
+    
+    @requiere_permiso('proveedores_editar')
+    def _editar_proveedor(self):
+        """Edita un proveedor existente"""
+        self.mostrar_cabecera("EDITAR PROVEEDOR")
+        
+        try:
+            idprov = int(input("ID del proveedor a editar: "))
+            proveedor = self.proveedor_service.obtener_por_id(idprov)
+            
+            if not proveedor:
+                print(f"❌ No existe proveedor con ID {idprov}")
+                self.pausa()
+                return
+            
+            print(f"\nEditando: {proveedor['razon_social']}")
+            print("(Deje en blanco para mantener el valor actual)")
+            print()
+            
+            razon = input(f"Razón Social [{proveedor['razon_social']}]: ") or proveedor['razon_social']
+            sector = input(f"Sector Comercial [{proveedor['sector_comercial']}]: ") or proveedor['sector_comercial']
+            
+            print("\n¿Cambiar tipo de documento? (s/N): ", end="")
+            cambiar_tipo = input().lower()
+            
+            if cambiar_tipo == 's':
+                print("\n" + "="*60)
+                print("🔍 NUEVO TIPO DE DOCUMENTO")
+                print("="*60)
+                print("1. 🇻🇪 Venezolano (V) → V12345678")
+                print("2. 🌎 Extranjero (E) → E87654321")
+                print("3. 🏢 Empresa (J) → J12345678")
+                print("4. 🏛️ Gobierno (G) → G12345678")
+                print("5. 👥 Consejo Comunal (C) → C12345678")
+                print("6. 🛂 Pasaporte → texto libre")
+                print("="*60)
+                
+                tipo_op = input("Seleccione nuevo tipo (1-6): ").strip()
+                
+                if tipo_op == '1':
+                    tipo_doc = 'V'
+                    print("Ingrese documento completo (ej: V12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('V'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con V")
+                        self.pausa()
+                        return
+                elif tipo_op == '2':
+                    tipo_doc = 'E'
+                    print("Ingrese documento completo (ej: E87654321):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('E'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con E")
+                        self.pausa()
+                        return
+                elif tipo_op == '3':
+                    tipo_doc = 'J'
+                    print("Ingrese documento completo (ej: J12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('J'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con J")
+                        self.pausa()
+                        return
+                elif tipo_op == '4':
+                    tipo_doc = 'G'
+                    print("Ingrese documento completo (ej: G12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('G'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con G")
+                        self.pausa()
+                        return
+                elif tipo_op == '5':
+                    tipo_doc = 'C'
+                    print("Ingrese documento completo (ej: C12345678):")
+                    doc_completo = input("Documento: ").upper()
+                    if doc_completo.startswith('C'):
+                        num_doc = doc_completo[1:]
+                    else:
+                        print("❌ Debe comenzar con C")
+                        self.pausa()
+                        return
+                elif tipo_op == '6':
+                    tipo_doc = 'PASAPORTE'
+                    num_doc = input("Número de pasaporte: ").upper()
+                else:
+                    print("❌ Opción no válida")
+                    self.pausa()
+                    return
+            else:
+                tipo_doc = proveedor['tipo_documento']
+                num_doc = proveedor['num_documento']
+            
+            direccion = input(f"Dirección [{proveedor.get('direccion', '')}]: ") or proveedor.get('direccion')
+            telefono = input(f"Teléfono [{proveedor.get('telefono', '')}]: ") or proveedor.get('telefono')
+            email = input(f"Email [{proveedor.get('email', '')}]: ") or proveedor.get('email')
+            url = input(f"URL [{proveedor.get('url', '')}]: ") or proveedor.get('url')
+            
+            if self.proveedor_service.actualizar(
+                idprov, razon, sector, tipo_doc, num_doc,
+                direccion, telefono, email, url
+            ):
+                print("\n✅ Proveedor actualizado correctamente")
+            else:
+                print("\n❌ Error al actualizar el proveedor")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('proveedores_eliminar')
+    def _eliminar_proveedor(self):
+        """Elimina un proveedor"""
+        self.mostrar_cabecera("ELIMINAR PROVEEDOR")
+        
+        try:
+            idprov = int(input("ID del proveedor a eliminar: "))
+            
+            proveedor = self.proveedor_service.obtener_por_id(idprov)
+            if not proveedor:
+                print(f"❌ No existe proveedor con ID {idprov}")
+                self.pausa()
+                return
+            
+            print(f"\n¿Está seguro de eliminar a {proveedor['razon_social']}?")
+            confirmacion = input("Esta acción no se puede deshacer (escriba 'ELIMINAR' para confirmar): ")
+            
+            if confirmacion == 'ELIMINAR':
+                if self.proveedor_service.eliminar(idprov):
+                    print("✅ Proveedor eliminado correctamente")
+                else:
+                    print("❌ Error al eliminar el proveedor (puede tener ingresos asociados)")
+            else:
+                print("Operación cancelada")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('proveedores_ver')
+    def _menu_archivos_proveedor(self, idproveedor):
+        """Menú de archivos de un proveedor específico"""
+        proveedor = self.proveedor_service.obtener_por_id(idproveedor)
+        if not proveedor:
+            print(f"❌ No existe proveedor con ID {idproveedor}")
+            self.pausa()
+            return
+        
+        while True:
+            self.mostrar_cabecera(f"ARCHIVOS DE: {proveedor['razon_social']}")
+            
+            archivos = self.proveedor_archivo_service.listar_archivos_proveedor(idproveedor)
+            
+            if archivos:
+                print(f"📋 ARCHIVOS DE: {proveedor['razon_social']}")
+                print(f"{'ID':<5} {'NOMBRE DEL ARCHIVO':<50} {'TIPO':<20} {'TAMAÑO':<10} {'FECHA':<20}")
+                print("-" * 105)
+                for a in archivos:
+                    tamano = self.proveedor_archivo_service.obtener_tamano_legible(a['tamano'])
+                    fecha = a['fecha_subida'].strftime('%Y-%m-%d %H:%M') if a['fecha_subida'] else ''
+                    nombre = a['nombre_archivo'][:47] + "..." if len(a['nombre_archivo']) > 47 else a['nombre_archivo']
+                    print(f"{a['idarchivo']:<5} {nombre:<50} {a['tipo_archivo'][:18]:<20} {tamano:<10} {fecha:<20}")
+                print()
+            else:
+                print(f"📭 No hay archivos para {proveedor['razon_social']}")
+                print()
+            
+            print("1. Subir nuevo archivo")
+            print("2. Descargar archivo")
+            print("3. Eliminar archivo")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._subir_archivo_proveedor(idproveedor)
+            elif opcion == '2':
+                self._descargar_archivo_por_id_menu(idproveedor)
+            elif opcion == '3':
+                self._eliminar_archivo_por_id_menu(idproveedor)
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    @requiere_permiso('proveedores_editar')
+    def _subir_archivo_proveedor(self, idproveedor):
+        """Sube un archivo para un proveedor"""
+        self.mostrar_cabecera("SUBIR ARCHIVO")
+        
+        print("📁 Formatos permitidos:")
+        print("  - Imágenes: .jpg, .png, .gif")
+        print("  - Documentos: .pdf, .doc, .docx")
+        print("  - Hojas de cálculo: .xls, .xlsx, .csv")
+        print("  - Texto: .txt")
+        print(f"  Tamaño máximo: 10 MB")
+        print()
+        
+        ruta = input("Ruta completa del archivo: ").strip()
+        ruta = ruta.replace('"', '').replace("'", "")
+        
+        if not os.path.exists(ruta):
+            print("❌ El archivo no existe")
+            self.pausa()
+            return
+        
+        descripcion = input("Descripción (opcional): ").strip() or None
+        
+        idarchivo = self.proveedor_archivo_service.subir_archivo(idproveedor, ruta, descripcion)
+        
+        if idarchivo:
+            print(f"✅ Archivo subido correctamente (ID: {idarchivo})")
+        else:
+            print("❌ Error al subir el archivo")
+        
+        self.pausa()
+    
+    def _descargar_archivo_por_id(self, idarchivo):
+        """Descarga un archivo por su ID (usado en listado global)"""
+        archivo = self.proveedor_archivo_service.obtener_archivo(idarchivo)
+        if not archivo:
+            print(f"❌ No existe archivo con ID {idarchivo}")
+            self.pausa()
+            return
+        
+        print(f"\n📌 Archivo: {archivo['nombre_archivo']}")
+        print(f"📌 Proveedor: {archivo['proveedor']}")
+        print(f"📌 Tamaño: {self.proveedor_archivo_service.obtener_tamano_legible(archivo['tamano'])}")
+        print()
+        
+        ruta_destino = input("Ruta donde guardar (Enter para Descargas/): ").strip()
+        if not ruta_destino:
+            import os
+            home = os.path.expanduser("~")
+            ruta_destino = os.path.join(home, "Descargas", archivo['nombre_archivo'])
+        
+        if self.proveedor_archivo_service.guardar_archivo(idarchivo, ruta_destino):
+            print(f"✅ Archivo guardado en: {ruta_destino}")
+        else:
+            print("❌ Error al guardar el archivo")
+        
+        self.pausa()
+    
+    def _descargar_archivo_por_id_menu(self, idproveedor):
+        """Descarga un archivo desde el menú específico de proveedor"""
+        try:
+            idarchivo = int(input("ID del archivo a descargar: "))
+            self._descargar_archivo_por_id(idarchivo)
+        except ValueError:
+            print("❌ ID inválido")
+            self.pausa()
+    
+    def _eliminar_archivo_por_id(self, idarchivo):
+        """Elimina un archivo por su ID"""
+        confirmacion = input(f"¿Está seguro de eliminar el archivo ID {idarchivo}? (s/N): ").lower()
+        if confirmacion == 's':
+            if self.proveedor_archivo_service.eliminar_archivo(idarchivo):
+                print("✅ Archivo eliminado correctamente")
+            else:
+                print("❌ Error al eliminar el archivo")
+        else:
+            print("Operación cancelada")
+        
+        self.pausa()
+    
+    def _eliminar_archivo_por_id_menu(self, idproveedor):
+        """Elimina un archivo desde el menú específico de proveedor"""
+        try:
+            idarchivo = int(input("ID del archivo a eliminar: "))
+            self._eliminar_archivo_por_id(idarchivo)
+        except ValueError:
+            print("❌ ID inválido")
+            self.pausa()
+    
+    def _listar_todos_archivos(self):
+        """Lista todos los archivos de todos los proveedores"""
+        self.mostrar_cabecera("LISTA DE PROVEEDORES (ARCHIVOS)")
+        
+        # Obtener todos los proveedores
+        proveedores = self.proveedor_service.listar()
+        
+        todos_archivos = []
+        for p in proveedores:
+            archivos = self.proveedor_archivo_service.listar_archivos_proveedor(p['idproveedor'])
+            for a in archivos:
+                a['proveedor_nombre'] = p['razon_social']
+                a['proveedor_id'] = p['idproveedor']
+                todos_archivos.append(a)
+        
+        if not todos_archivos:
+            print("📭 No hay archivos subidos por ningún proveedor")
+            self.pausa()
+            return
+        
+        print(f"{'ID':<5} {'PROVEEDOR':<25} {'NOMBRE DEL ARCHIVO':<50} {'TIPO':<20} {'TAMAÑO':<10} {'FECHA':<15}")
+        print("-" * 125)
+        for a in todos_archivos:
+            tamano = self.proveedor_archivo_service.obtener_tamano_legible(a['tamano'])
+            fecha = a['fecha_subida'].strftime('%Y-%m-%d') if a['fecha_subida'] else ''
+            nombre = a['nombre_archivo'][:47] + "..." if len(a['nombre_archivo']) > 47 else a['nombre_archivo']
+            proveedor = a['proveedor_nombre'][:23] + "..." if len(a['proveedor_nombre']) > 23 else a['proveedor_nombre']
+            print(f"{a['idarchivo']:<5} {proveedor:<25} {nombre:<50} {a['tipo_archivo'][:18]:<20} {tamano:<10} {fecha:<15}")
+        print()
+        
+        while True:
+            print("\nOpciones:")
+            print("1. Descargar archivo por ID")
+            print("2. Eliminar archivo por ID")
+            print("3. Subir nuevo archivo (seleccionar proveedor)")
+            print("4. Ver archivos de un proveedor específico")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                try:
+                    idarchivo = int(input("ID del archivo a descargar: "))
+                    self._descargar_archivo_por_id(idarchivo)
+                except ValueError:
+                    print("❌ ID inválido")
+                    self.pausa()
+            elif opcion == '2':
+                try:
+                    idarchivo = int(input("ID del archivo a eliminar: "))
+                    self._eliminar_archivo_por_id(idarchivo)
+                except ValueError:
+                    print("❌ ID inválido")
+                    self.pausa()
+            elif opcion == '3':
+                self._subir_archivo_con_seleccion_proveedor()
+            elif opcion == '4':
+                try:
+                    idprov = int(input("ID del proveedor: "))
+                    self._menu_archivos_proveedor(idprov)
+                except ValueError:
+                    print("❌ ID inválido")
+                    self.pausa()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    def _subir_archivo_con_seleccion_proveedor(self):
+        """Sube un archivo seleccionando primero el proveedor"""
+        proveedores = self.proveedor_service.listar()
+        if not proveedores:
+            print("❌ No hay proveedores registrados")
+            self.pausa()
+            return
+        
+        print("\n📋 PROVEEDORES DISPONIBLES:")
+        print(f"{'ID':<5} {'RAZÓN SOCIAL':<30}")
+        print("-" * 35)
+        for p in proveedores:
+            print(f"{p['idproveedor']:<5} {p['razon_social']:<30}")
+        print()
+        
+        try:
+            idproveedor = int(input("ID del proveedor: "))
+            proveedor = self.proveedor_service.obtener_por_id(idproveedor)
+            if not proveedor:
+                print("❌ Proveedor no válido")
+                self.pausa()
+                return
+        except ValueError:
+            print("❌ ID inválido")
+            self.pausa()
+            return
+        
+        self._subir_archivo_proveedor(idproveedor)
+    
+    @requiere_permiso('inventario_ver')
+    def menu_inventario(self):
+        """Menú de gestión de inventario con alertas de stock"""
+        while True:
+            self.mostrar_cabecera("GESTIÓN DE INVENTARIO")
+            
+            # Mostrar alertas al entrar al menú
+            alertas = self.inventario_service.obtener_alertas_stock()
+            if alertas:
+                print("⚠️ ALERTAS DE STOCK:")
+                for alerta in alertas[:3]:  # Mostrar primeras 3 alertas
+                    print(f"   {alerta}")
+                print()
+            
+            print("1. Ver stock completo")
+            print("2. Ver resumen de inventario")
+            print("3. Artículos con stock crítico")
+            print("4. Artículos con stock bajo")
+            print("5. Ver detalles de artículo")
+            print("6. Registrar ingreso de mercancía")
+            print("0. Volver")
+            print()
+            
+            opcion = input("🔹 Seleccione una opción: ").strip()
+            
+            if opcion == '1':
+                self._ver_stock_completo()
+            elif opcion == '2':
+                self._ver_resumen_inventario()
+            elif opcion == '3':
+                self._ver_stock_critico()
+            elif opcion == '4':
+                self._ver_stock_bajo()
+            elif opcion == '5':
+                self._ver_detalle_stock()
+            elif opcion == '6':
+                self._registrar_ingreso()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+    
+    def _ver_stock_completo(self):
+        """Muestra tabla completa de stock con colores"""
+        self.mostrar_cabecera("STOCK COMPLETO")
+        print(self.inventario_service.mostrar_tabla_stock())
+        self.pausa()
+    
+    def _ver_resumen_inventario(self):
+        """Muestra resumen del inventario"""
+        self.mostrar_cabecera("RESUMEN DE INVENTARIO")
+        print(self.inventario_service.mostrar_resumen_stock())
+        self.pausa()
+    
+    def _ver_stock_critico(self):
+        """Muestra solo artículos con stock crítico"""
+        self.mostrar_cabecera("STOCK CRÍTICO (menos de 3 unidades)")
+        
+        articulos = self.inventario_service.listar_con_stock()
+        criticos = [a for a in articulos if a['nivel_stock'] == 'CRÍTICO']
+        
+        if not criticos:
+            print("✅ No hay artículos con stock crítico")
+        else:
+            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'STOCK':<10}")
+            print("-" * 60)
+            for art in criticos:
+                print(f"{art['color']}{art['idarticulo']:<5} {art['codigo']:<15} {art['nombre']:<30} {art['stock_actual']:<10}{self.inventario_service.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _ver_stock_bajo(self):
+        """Muestra artículos con stock bajo (entre 3 y 5 unidades)"""
+        self.mostrar_cabecera("STOCK BAJO (entre 3 y 5 unidades)")
+        
+        articulos = self.inventario_service.listar_con_stock()
+        bajos = [a for a in articulos if a['nivel_stock'] == 'BAJO']
+        
+        if not bajos:
+            print("✅ No hay artículos con stock bajo")
+        else:
+            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'STOCK':<10}")
+            print("-" * 60)
+            for art in bajos:
+                print(f"{art['color']}{art['idarticulo']:<5} {art['codigo']:<15} {art['nombre']:<30} {art['stock_actual']:<10}{self.inventario_service.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _ver_detalle_stock(self):
+        """Muestra detalle de un artículo específico"""
+        self.mostrar_cabecera("DETALLE DE STOCK")
+        
+        try:
+            idart = int(input("ID del artículo: "))
+            art = self.articulo_service.obtener_por_id(idart)
+            
+            if not art:
+                print(f"❌ No existe artículo con ID {idart}")
+                self.pausa()
+                return
+            
+            stock = self.inventario_service.obtener_stock_articulo(idart)
+            nivel = self.inventario_service.obtener_nivel_stock(stock)
+            
+            print(f"\n📌 Artículo: {art['nombre']}")
+            print(f"📌 Código: {art['codigo']}")
+            print(f"📌 Stock actual: {stock} unidades")
+            print(f"📌 Estado: {nivel['color']}{nivel['emoji']} {nivel['nivel']}{self.inventario_service.COLOR_RESET}")
+            print(f"📌 {nivel['mensaje']}")
+            
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        self.pausa()
+    
+    @requiere_permiso('inventario_ingresos')
+    def _registrar_ingreso(self):
+        """Registra un nuevo ingreso de mercancía"""
+        self.mostrar_cabecera("REGISTRAR INGRESO")
+        
+        # Verificar que haya proveedores
+        proveedores = self.proveedor_service.listar()
+        if not proveedores:
+            print("❌ No hay proveedores registrados.")
+            print("   Por favor, cree un proveedor primero (Opción 3 → Opción 3)")
+            self.pausa()
+            return
+        
+        # Seleccionar proveedor
+        print("Proveedores disponibles:")
+        for p in proveedores:
+            print(f"  {p['idproveedor']}. {p['razon_social']}")
+        
+        try:
+            idproveedor = int(input("\nID del proveedor: "))
+            proveedor = self.proveedor_service.obtener_por_id(idproveedor)
+            if not proveedor:
+                print("❌ Proveedor no válido")
+                self.pausa()
+                return
+        except:
+            print("❌ ID inválido")
+            self.pausa()
+            return
+        
+        # Datos del ingreso
+        print("\nTipo de comprobante:")
+        print("  1. Factura")
+        print("  2. Boleta")
+        print("  3. Guía")
+        tipo_map = {'1': 'FACTURA', '2': 'BOLETA', '3': 'GUIA'}
+        tipo_op = input("Seleccione: ").strip()
+        tipo_comprobante = tipo_map.get(tipo_op, 'FACTURA')
+        
+        serie = input("Serie (ej. F001): ")
+        numero = input("Número: ")
+        
+        # Detalle del ingreso
+        detalle = []
+        print("\n📦 AGREGAR PRODUCTOS AL INGRESO")
+        print("="*40)
+        
+        # Mostrar lista de artículos disponibles
+        print("\n📋 ARTÍCULOS DISPONIBLES:")
+        articulos = self.articulo_service.listar()
+        if not articulos:
+            print("❌ No hay artículos registrados. Cree artículos primero.")
+            self.pausa()
+            return
+        
+        print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20}")
+        print("-" * 70)
+        for a in articulos:
+            cat_nombre = a.get('categoria', '')
+            if not cat_nombre:
+                idcat = a.get('idcategoria')
+                if idcat:
+                    categoria = self.categoria_service.obtener_por_id(idcat)
+                    cat_nombre = categoria['nombre'] if categoria else 'N/A'
+                else:
+                    cat_nombre = 'N/A'
+            print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {cat_nombre:<20}")
+        print()
+        
+        while True:
+            print("\n--- Agregar producto ---")
+            codigo = input("Código del artículo (0 para terminar, '?' para ver lista): ")
+            
+            if codigo == '0':
+                break
+            elif codigo == '?':
+                print("\n📋 ARTÍCULOS DISPONIBLES:")
+                print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20}")
+                print("-" * 70)
+                for a in articulos:
+                    cat_nombre = a.get('categoria', '')
+                    if not cat_nombre:
+                        idcat = a.get('idcategoria')
+                        if idcat:
+                            categoria = self.categoria_service.obtener_por_id(idcat)
+                            cat_nombre = categoria['nombre'] if categoria else 'N/A'
+                        else:
+                            cat_nombre = 'N/A'
+                    print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {cat_nombre:<20}")
+                continue
+            
+            art = self.articulo_service.buscar_por_codigo(codigo)
+            if not art:
+                try:
+                    idart = int(codigo)
+                    art = self.articulo_service.obtener_por_id(idart)
+                except:
+                    pass
+            
+            if not art:
+                print("❌ Artículo no encontrado. Use '?' para ver la lista.")
+                continue
+            
+            categoria_nombre = art.get('categoria', '')
+            if not categoria_nombre:
+                idcat = art.get('idcategoria')
+                if idcat:
+                    categoria = self.categoria_service.obtener_por_id(idcat)
+                    if categoria:
+                        categoria_nombre = categoria['nombre']
+                    else:
+                        categoria_nombre = 'No especificada'
+                else:
+                    categoria_nombre = 'No especificada'
+            
+            print(f"📌 Artículo seleccionado: {art['nombre']}")
+            print(f"   Código: {art['codigo']}")
+            print(f"   Categoría: {categoria_nombre}")
+            
+            try:
+                cantidad = int(input("Cantidad a ingresar: "))
+                if cantidad <= 0:
+                    print("❌ La cantidad debe ser positiva")
+                    continue
+                precio = float(input("Precio de compra: "))
+                if precio <= 0:
+                    print("❌ El precio debe ser positivo")
+                    continue
+            except ValueError:
+                print("❌ Cantidad o precio inválido")
+                continue
+            
+            detalle.append({
+                'idarticulo': art['idarticulo'],
+                'cantidad': cantidad,
+                'precio_compra': precio
+            })
+            print(f"✅ {art['nombre']} agregado - {cantidad} unidades a Bs. {precio:.2f}")
+        
+        if not detalle:
+            print("❌ Debe agregar al menos un producto")
+            self.pausa()
+            return
+        
+        print("\n" + "="*50)
+        print("📋 RESUMEN DEL INGRESO")
+        print("="*50)
+        print(f"Proveedor: {proveedor['razon_social']}")
+        print(f"Comprobante: {tipo_comprobante} {serie}-{numero}")
+        print("\nProductos:")
+        total = 0
+        for item in detalle:
+            art = self.articulo_service.obtener_por_id(item['idarticulo'])
+            subtotal = item['cantidad'] * item['precio_compra']
+            total += subtotal
+            print(f"  - {art['nombre']}: {item['cantidad']} und @ Bs.{item['precio_compra']:.2f} = Bs.{subtotal:.2f}")
+        print(f"\n💰 TOTAL: Bs.{total:.2f}")
+        print("="*50)
+        
+        confirmar = input("¿Confirmar ingreso? (s/N): ").lower()
+        if confirmar != 's':
+            print("Operación cancelada")
+            self.pausa()
+            return
+        
+        usuario = self.trabajador_service.get_usuario_actual()
+        idingreso = self.ingreso_service.registrar_ingreso(
+            usuario['idtrabajador'], idproveedor, tipo_comprobante,
+            serie, numero, 16.0, detalle
+        )
+        
+        if idingreso:
+            print(f"\n✅ Ingreso #{idingreso} registrado correctamente")
+            print("📦 Stock actualizado automáticamente")
+        else:
+            print("\n❌ Error al registrar el ingreso")
+        
+        self.pausa()
+    
     def run(self):
         """Ejecuta el sistema"""
         if not self.conectar_db():
@@ -1305,10 +2567,10 @@ class SistemaVentas:
                     self.pausa()
             elif opcion == '3':
                 if self.rol_service.tiene_permiso('proveedores_ver'):
-                    print("🔧 Módulo de proveedores en desarrollo")
+                    self.menu_proveedores()
                 else:
                     print("❌ No tiene permisos para acceder a proveedores")
-                self.pausa()
+                    self.pausa()
             elif opcion == '4':
                 if self.rol_service.tiene_permiso('ventas_ver'):
                     self.menu_ventas()
@@ -1317,10 +2579,10 @@ class SistemaVentas:
                     self.pausa()
             elif opcion == '5':
                 if self.rol_service.tiene_permiso('inventario_ver'):
-                    print("🔧 Módulo de inventario en desarrollo")
+                    self.menu_inventario()
                 else:
                     print("❌ No tiene permisos para acceder a inventario")
-                self.pausa()
+                    self.pausa()
             elif opcion == '6':
                 if self.rol_service.tiene_permiso('reportes_ventas'):
                     print("🔧 Módulo de reportes en desarrollo")
