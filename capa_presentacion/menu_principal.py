@@ -39,6 +39,7 @@ from capa_negocio.ingreso_service import IngresoService
 from capa_negocio.proveedor_archivo_service import ProveedorArchivoService
 
 from capa_presentacion.decoradores import requiere_permiso
+from capa_presentacion.input_con_mascara import leer_con_mascara
 
 from loguru import logger
 
@@ -796,7 +797,7 @@ class SistemaVentas:
     
     @requiere_permiso('clientes_crear')
     def _crear_cliente(self):
-        """Crea un nuevo cliente con validación venezolana"""
+        """Crea un nuevo cliente con validación venezolana, máscara de fecha y email opcional"""
         self.mostrar_cabecera("CREAR CLIENTE")
         
         print("📝 Complete los datos del cliente:")
@@ -805,7 +806,10 @@ class SistemaVentas:
         nombre = input("Nombre: ")
         apellidos = input("Apellidos: ")
         sexo = input("Sexo (M/F/O): ").upper()
-        fecha_nac = input("Fecha de nacimiento (YYYY-MM-DD): ")
+        
+        print("Fecha de nacimiento (DD/MM/YYYY):")
+        fecha_nac = leer_con_mascara("DD/MM/YYYY")
+        print()  # Línea en blanco después de la fecha
         
         # Selección de tipo de persona
         print("\n" + "="*60)
@@ -909,9 +913,18 @@ class SistemaVentas:
             self.pausa()
             return
         
-        direccion = input("\nDirección (opcional): ") or None
+        # Email (opcional para clientes)
+        print("\n📧 Email (opcional para clientes):")
+        email = input("Email: ").strip()
+        if email and ('@' not in email or '.' not in email):
+            print("❌ El email no tiene un formato válido (debe contener @ y .)")
+            self.pausa()
+            return
+        if not email:
+            email = None
+        
+        direccion = input("Dirección (opcional): ") or None
         telefono = input("Teléfono (opcional): ") or None
-        email = input("Email (opcional): ") or None
         
         if self.cliente_service.crear(
             nombre, apellidos, fecha_nac, tipo_doc, num_doc,
@@ -978,138 +991,231 @@ class SistemaVentas:
     
     @requiere_permiso('clientes_editar')
     def _editar_cliente(self):
-        """Edita un cliente existente"""
+        """Edita un cliente existente (búsqueda por ID o documento con formato flexible)"""
         self.mostrar_cabecera("EDITAR CLIENTE")
         
-        try:
-            idcliente = int(input("ID del cliente a editar: "))
-            cliente = self.cliente_service.obtener_por_id(idcliente)
-            
-            if not cliente:
-                print(f"❌ No existe cliente con ID {idcliente}")
-                self.pausa()
-                return
-            
-            # Mostrar tipo actual con emoji
-            tipo_actual = cliente['tipo_documento']
-            if tipo_actual == 'V':
-                tipo_texto = "🇻🇪 Persona Natural Venezolana"
-            elif tipo_actual == 'E':
-                tipo_texto = "🌎 Persona Natural Extranjera"
-            elif tipo_actual == 'J':
-                tipo_texto = "🏢 Empresa"
-            elif tipo_actual == 'G':
-                tipo_texto = "🏛️ Gobierno / Institución"
-            elif tipo_actual == 'C':
-                tipo_texto = "👥 Consejo Comunal"
-            elif tipo_actual == 'PASAPORTE':
-                tipo_texto = "🛂 Pasaporte"
-            else:
-                tipo_texto = tipo_actual
-            
-            print(f"\nEditando a: {cliente['nombre']} {cliente['apellidos']}")
-            print(f"📌 Tipo actual: {tipo_texto}")
-            print("(Deje en blanco para mantener el valor actual)")
-            print()
-            
-            nombre = input(f"Nombre [{cliente['nombre']}]: ") or cliente['nombre']
-            apellidos = input(f"Apellidos [{cliente['apellidos']}]: ") or cliente['apellidos']
-            sexo = input(f"Sexo [{cliente['sexo']}]: ").upper() or cliente['sexo']
-            fecha_nac = input(f"Fecha Nac. [{cliente['fecha_nacimiento']}]: ") or cliente['fecha_nacimiento']
-            
-            print("\n¿Cambiar tipo de documento? (s/N): ", end="")
-            cambiar_tipo = input().lower()
-            
-            if cambiar_tipo == 's':
-                # Similar a la creación
-                print("\n" + "="*60)
-                print("🔍 NUEVO TIPO DE DOCUMENTO")
-                print("="*60)
-                print("1. 🇻🇪 Venezolano (V) → V12345678")
-                print("2. 🌎 Extranjero (E) → E87654321")
-                print("3. 🏢 Empresa (J) → J12345678")
-                print("4. 🏛️ Gobierno (G) → G12345678")
-                print("5. 👥 Consejo Comunal (C) → C12345678")
-                print("6. 🛂 Pasaporte → texto libre")
-                print("="*60)
-                
-                tipo_op = input("Seleccione nuevo tipo (1-6): ").strip()
-                
-                if tipo_op == '1':
-                    tipo_doc = 'V'
-                    print("Ingrese documento completo (ej: V12345678):")
-                    doc_completo = input("Documento: ").upper()
-                    if doc_completo.startswith('V'):
-                        num_doc = doc_completo[1:]
-                    else:
-                        print("❌ Debe comenzar con V")
-                        self.pausa()
-                        return
-                elif tipo_op == '2':
-                    tipo_doc = 'E'
-                    print("Ingrese documento completo (ej: E87654321):")
-                    doc_completo = input("Documento: ").upper()
-                    if doc_completo.startswith('E'):
-                        num_doc = doc_completo[1:]
-                    else:
-                        print("❌ Debe comenzar con E")
-                        self.pausa()
-                        return
-                elif tipo_op == '3':
-                    tipo_doc = 'J'
-                    print("Ingrese documento completo (ej: J12345678):")
-                    doc_completo = input("Documento: ").upper()
-                    if doc_completo.startswith('J'):
-                        num_doc = doc_completo[1:]
-                    else:
-                        print("❌ Debe comenzar con J")
-                        self.pausa()
-                        return
-                elif tipo_op == '4':
-                    tipo_doc = 'G'
-                    print("Ingrese documento completo (ej: G12345678):")
-                    doc_completo = input("Documento: ").upper()
-                    if doc_completo.startswith('G'):
-                        num_doc = doc_completo[1:]
-                    else:
-                        print("❌ Debe comenzar con G")
-                        self.pausa()
-                        return
-                elif tipo_op == '5':
-                    tipo_doc = 'C'
-                    print("Ingrese documento completo (ej: C12345678):")
-                    doc_completo = input("Documento: ").upper()
-                    if doc_completo.startswith('C'):
-                        num_doc = doc_completo[1:]
-                    else:
-                        print("❌ Debe comenzar con C")
-                        self.pausa()
-                        return
-                elif tipo_op == '6':
-                    tipo_doc = 'PASAPORTE'
-                    num_doc = input("Número de pasaporte: ").upper()
-                else:
-                    print("❌ Opción no válida")
+        print("¿Cómo desea buscar el cliente?")
+        print("1. Buscar por ID")
+        print("2. Buscar por documento")
+        opcion = input("🔹 Seleccione: ").strip()
+        
+        cliente = None
+        
+        if opcion == '1':
+            try:
+                idcliente = int(input("ID del cliente: "))
+                cliente = self.cliente_service.obtener_por_id(idcliente)
+                if not cliente:
+                    print(f"❌ No existe cliente con ID {idcliente}")
                     self.pausa()
                     return
-            else:
-                tipo_doc = cliente['tipo_documento']
-                num_doc = cliente['num_documento']
+            except ValueError:
+                print("❌ ID inválido")
+                self.pausa()
+                return
+                
+        elif opcion == '2':
+            doc = input("Número de documento (ej: V12345678): ").upper()
+            # Limpiar el documento: quitar guiones y espacios
+            doc_limpio = doc.replace('-', '').replace(' ', '')
             
-            direccion = input(f"Dirección [{cliente.get('direccion', '')}]: ") or cliente.get('direccion')
-            telefono = input(f"Teléfono [{cliente.get('telefono', '')}]: ") or cliente.get('telefono')
-            email = input(f"Email [{cliente.get('email', '')}]: ") or cliente.get('email')
+            # Buscar por documento (probando diferentes formatos)
+            cliente_simple = None
             
-            if self.cliente_service.actualizar(
-                idcliente, nombre, apellidos, fecha_nac, tipo_doc, num_doc,
-                sexo, direccion, telefono, email
-            ):
-                print("\n✅ Cliente actualizado correctamente")
-            else:
-                print("\n❌ Error al actualizar el cliente")
+            # Intentar 1: búsqueda exacta con el formato ingresado
+            cliente_simple = self.cliente_service.buscar_por_documento(doc)
+            
+            # Intentar 2: búsqueda sin guiones
+            if not cliente_simple:
+                cliente_simple = self.cliente_service.buscar_por_documento(doc_limpio)
+            
+            # Intentar 3: búsqueda con guión después de la letra
+            if not cliente_simple and len(doc_limpio) >= 9:
+                doc_con_guion = doc_limpio[0] + '-' + doc_limpio[1:]
+                cliente_simple = self.cliente_service.buscar_por_documento(doc_con_guion)
+            
+            if not cliente_simple:
+                print(f"❌ No existe cliente con documento {doc}")
+                self.pausa()
+                return
+            # Obtener datos completos
+            cliente = self.cliente_service.obtener_por_id(cliente_simple['idcliente'])
+            
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
         
-        except Exception as e:
-            print(f"❌ Error: {e}")
+        # Mostrar tipo actual con emoji
+        tipo_actual = cliente['tipo_documento']
+        if tipo_actual == 'V':
+            tipo_texto = "🇻🇪 Persona Natural Venezolana"
+        elif tipo_actual == 'E':
+            tipo_texto = "🌎 Persona Natural Extranjera"
+        elif tipo_actual == 'J':
+            tipo_texto = "🏢 Empresa"
+        elif tipo_actual == 'G':
+            tipo_texto = "🏛️ Gobierno / Institución"
+        elif tipo_actual == 'C':
+            tipo_texto = "👥 Consejo Comunal"
+        elif tipo_actual == 'PASAPORTE':
+            tipo_texto = "🛂 Pasaporte"
+        else:
+            tipo_texto = tipo_actual
+        
+        print(f"\nEditando a: {cliente['nombre']} {cliente['apellidos']}")
+        print(f"📌 Tipo actual: {tipo_texto}")
+        print("(Deje en blanco para mantener el valor actual)")
+        print()
+        
+        nombre = input(f"Nombre [{cliente['nombre']}]: ") or cliente['nombre']
+        apellidos = input(f"Apellidos [{cliente['apellidos']}]: ") or cliente['apellidos']
+        sexo = input(f"Sexo [{cliente['sexo']}]: ").upper() or cliente['sexo']
+        
+        # Usar la máscara para la fecha si se va a cambiar
+        fecha_actual = cliente['fecha_nacimiento'].strftime('%d/%m/%Y') if hasattr(cliente['fecha_nacimiento'], 'strftime') else cliente['fecha_nacimiento']
+        print(f"Fecha de nacimiento actual: {fecha_actual}")
+        print("Presione Enter para mantener o ingrese nueva fecha:")
+        
+        # Capturar entrada sin máscara si solo es Enter
+        import sys
+        import tty
+        import termios
+        
+        print("\rDD/MM/YYYY", end='', flush=True)
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        
+        chars = []
+        pos = 0
+        
+        try:
+            tty.setraw(sys.stdin.fileno())
+            
+            while pos < 10:
+                char = sys.stdin.read(1)
+                if ord(char) == 13 or ord(char) == 10:  # Enter
+                    break
+                elif ord(char) == 3:  # Ctrl+C
+                    raise KeyboardInterrupt
+                elif ord(char) == 127 or ord(char) == 8:  # Backspace
+                    if pos > 0:
+                        pos -= 1
+                        chars.pop()
+                        print("\r" + "DD/MM/YYYY", end='', flush=True)
+                        print("\r" + "".join(chars) + "DD/MM/YYYY"[len(chars):], end='', flush=True)
+                elif char.isdigit():
+                    if pos < 10:
+                        chars.append(char)
+                        pos += 1
+                        print("\r" + "".join(chars) + "DD/MM/YYYY"[len(chars):], end='', flush=True)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            print()
+        
+        if pos == 0:
+            # Mantener la fecha actual (ya es un objeto date)
+            fecha_nac = cliente['fecha_nacimiento']
+        else:
+            # Convertir la nueva fecha a string
+            fecha_str = ''.join(chars)
+            if len(fecha_str) == 8:
+                fecha_nac = f"{fecha_str[0:2]}/{fecha_str[2:4]}/{fecha_str[4:8]}"
+            else:
+                print("❌ Fecha incompleta. Debe ingresar 8 dígitos (DDMMYYYY)")
+                self.pausa()
+                return
+        
+        print("\n¿Cambiar tipo de documento? (s/N): ", end="")
+        cambiar_tipo = input().lower()
+        
+        if cambiar_tipo == 's':
+            # Similar a la creación
+            print("\n" + "="*60)
+            print("🔍 NUEVO TIPO DE DOCUMENTO")
+            print("="*60)
+            print("1. 🇻🇪 Venezolano (V) → V12345678")
+            print("2. 🌎 Extranjero (E) → E87654321")
+            print("3. 🏢 Empresa (J) → J12345678")
+            print("4. 🏛️ Gobierno (G) → G12345678")
+            print("5. 👥 Consejo Comunal (C) → C12345678")
+            print("6. 🛂 Pasaporte → texto libre")
+            print("="*60)
+            
+            tipo_op = input("Seleccione nuevo tipo (1-6): ").strip()
+            
+            if tipo_op == '1':
+                tipo_doc = 'V'
+                print("Ingrese documento completo (ej: V12345678):")
+                doc_completo = input("Documento: ").upper()
+                if doc_completo.startswith('V'):
+                    num_doc = doc_completo[1:]
+                else:
+                    print("❌ Debe comenzar con V")
+                    self.pausa()
+                    return
+            elif tipo_op == '2':
+                tipo_doc = 'E'
+                print("Ingrese documento completo (ej: E87654321):")
+                doc_completo = input("Documento: ").upper()
+                if doc_completo.startswith('E'):
+                    num_doc = doc_completo[1:]
+                else:
+                    print("❌ Debe comenzar con E")
+                    self.pausa()
+                    return
+            elif tipo_op == '3':
+                tipo_doc = 'J'
+                print("Ingrese documento completo (ej: J12345678):")
+                doc_completo = input("Documento: ").upper()
+                if doc_completo.startswith('J'):
+                    num_doc = doc_completo[1:]
+                else:
+                    print("❌ Debe comenzar con J")
+                    self.pausa()
+                    return
+            elif tipo_op == '4':
+                tipo_doc = 'G'
+                print("Ingrese documento completo (ej: G12345678):")
+                doc_completo = input("Documento: ").upper()
+                if doc_completo.startswith('G'):
+                    num_doc = doc_completo[1:]
+                else:
+                    print("❌ Debe comenzar con G")
+                    self.pausa()
+                    return
+            elif tipo_op == '5':
+                tipo_doc = 'C'
+                print("Ingrese documento completo (ej: C12345678):")
+                doc_completo = input("Documento: ").upper()
+                if doc_completo.startswith('C'):
+                    num_doc = doc_completo[1:]
+                else:
+                    print("❌ Debe comenzar con C")
+                    self.pausa()
+                    return
+            elif tipo_op == '6':
+                tipo_doc = 'PASAPORTE'
+                num_doc = input("Número de pasaporte: ").upper()
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+                return
+        else:
+            tipo_doc = cliente['tipo_documento']
+            num_doc = cliente['num_documento']
+        
+        direccion = input(f"Dirección [{cliente.get('direccion', '')}]: ") or cliente.get('direccion')
+        telefono = input(f"Teléfono [{cliente.get('telefono', '')}]: ") or cliente.get('telefono')
+        email = input(f"Email [{cliente.get('email', '')}]: ") or cliente.get('email')
+        
+        if self.cliente_service.actualizar(
+            cliente['idcliente'], nombre, apellidos, fecha_nac, tipo_doc, num_doc,
+            sexo, direccion, telefono, email
+        ):
+            print("\n✅ Cliente actualizado correctamente")
+        else:
+            print("\n❌ Error al actualizar el cliente")
         
         self.pausa()
     
@@ -1399,7 +1505,7 @@ class SistemaVentas:
     
     @requiere_permiso('ventas_ver')
     def menu_ventas(self):
-        """Menú de gestión de ventas"""
+        """Menú de gestión de ventas (con opción a consumidor final)"""
         while True:
             self.mostrar_cabecera("GESTIÓN DE VENTAS")
             print("1. Listar ventas")
@@ -1425,43 +1531,64 @@ class SistemaVentas:
                 print("❌ Opción no válida")
                 self.pausa()
     
-    @requiere_permiso('ventas_ver')
-    def _listar_ventas(self):
-        """Lista todas las ventas"""
-        self.mostrar_cabecera("LISTADO DE VENTAS")
-        
-        ventas = self.venta_service.listar()
-        
-        if not ventas:
-            print("📭 No hay ventas registradas")
-        else:
-            print(f"{'ID':<5} {'FECHA':<12} {'COMPROBANTE':<20} {'CLIENTE':<25} {'ESTADO':<10}")
-            print("-" * 72)
-            for v in ventas:
-                comp = f"{v['tipo_comprobante']} {v['serie']}-{v['numero_comprobante']}"
-                print(f"{v['idventa']:<5} {v['fecha']:<12} {comp:<20} {v['cliente']:<25} {v['estado']:<10}")
-        
-        self.pausa()
-    
     @requiere_permiso('ventas_crear')
     def _registrar_venta(self):
-        """Registra una nueva venta"""
+        """Registra una nueva venta (con opción a consumidor final)"""
         self.mostrar_cabecera("REGISTRAR VENTA")
         
-        # Seleccionar cliente
         print("Seleccionar cliente:")
-        clientes = self.cliente_service.listar()
-        for c in clientes[:5]:  # Mostrar solo primeros 5
-            nombre_completo = f"{c['nombre']} {c['apellidos']}"
-            documento = f"{c['tipo_documento']}-{c['num_documento']}"
-            print(f"  {c['idcliente']}. {nombre_completo} ({documento})")
+        print("0. CONSUMIDOR FINAL (sin registro)")
+        print("1. Buscar cliente existente")
+        print("2. Crear cliente nuevo")
+        opcion = input("🔹 Seleccione: ").strip()
         
-        try:
-            idcliente = int(input("\nID del cliente: "))
-        except:
-            print("❌ Cliente inválido")
+        idcliente = None
+        
+        if opcion == '0':
+            idcliente = 1  # Asumiendo que el ID del consumidor final es 1
+            print("✅ Usando CONSUMIDOR FINAL")
+            
+        elif opcion == '1':
+            # Buscar cliente existente
+            print("\nBuscar cliente:")
+            print("1. Por ID")
+            print("2. Por documento")
+            subop = input("🔹 Seleccione: ").strip()
+            
+            if subop == '1':
+                try:
+                    idcliente = int(input("ID del cliente: "))
+                    cliente = self.cliente_service.obtener_por_id(idcliente)
+                    if not cliente:
+                        print("❌ Cliente no encontrado")
+                        self.pausa()
+                        return
+                except:
+                    print("❌ ID inválido")
+                    self.pausa()
+                    return
+            else:
+                doc = input("Número de documento (ej: V12345678): ").upper()
+                cliente_simple = self.cliente_service.buscar_por_documento(doc)
+                if not cliente_simple:
+                    print("❌ Cliente no encontrado")
+                    self.pausa()
+                    return
+                idcliente = cliente_simple['idcliente']
+                
+        elif opcion == '2':
+            # Crear cliente nuevo
+            self._crear_cliente()
+            print("\n✅ Cliente creado. Por favor, selecciónelo en la opción 1")
             self.pausa()
             return
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
+        
+        # Continuar con el registro de venta
+        print(f"\nCliente seleccionado: ID {idcliente}")
         
         # Datos de la venta
         print("\nTipo de comprobante:")
@@ -1543,6 +1670,24 @@ class SistemaVentas:
             print(f"✅ Venta {idventa} registrada correctamente")
         else:
             print("❌ Error al registrar la venta")
+        
+        self.pausa()
+    
+    @requiere_permiso('ventas_ver')
+    def _listar_ventas(self):
+        """Lista todas las ventas"""
+        self.mostrar_cabecera("LISTADO DE VENTAS")
+        
+        ventas = self.venta_service.listar()
+        
+        if not ventas:
+            print("📭 No hay ventas registradas")
+        else:
+            print(f"{'ID':<5} {'FECHA':<12} {'COMPROBANTE':<20} {'CLIENTE':<25} {'ESTADO':<10}")
+            print("-" * 72)
+            for v in ventas:
+                comp = f"{v['tipo_comprobante']} {v['serie']}-{v['numero_comprobante']}"
+                print(f"{v['idventa']:<5} {v['fecha']:<12} {comp:<20} {v['cliente']:<25} {v['estado']:<10}")
         
         self.pausa()
     

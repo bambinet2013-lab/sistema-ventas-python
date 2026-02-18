@@ -44,20 +44,57 @@ class ClienteRepositorio:
             return None
     
     def buscar_por_documento(self, num_documento: str) -> Optional[Dict]:
-        """Busca un cliente por número de documento"""
+        """
+        Busca un cliente por número de documento (formato flexible)
+        Acepta: V12345678, V-12345678, v12345678, etc.
+        """
         try:
-            self.cursor.execute(
-                "SELECT idcliente, nombre, apellidos FROM cliente WHERE num_documento = ?",
-                (num_documento,)
-            )
+            # Limpiar el documento: quitar guiones y espacios, convertir a mayúsculas
+            doc_limpio = num_documento.replace('-', '').replace(' ', '').upper()
+            
+            logger.info(f"🔍 Buscando documento: original='{num_documento}', limpio='{doc_limpio}'")
+            
+            # Intentar 1: Buscar por el formato exacto como está en la BD (puede ser con o sin guión)
+            self.cursor.execute("""
+                SELECT idcliente, nombre, apellidos, tipo_documento, num_documento
+                FROM cliente 
+                WHERE (tipo_documento + '-' + num_documento) = ? 
+                   OR (tipo_documento + num_documento) = ?
+                   OR num_documento = ?
+            """, (num_documento, doc_limpio, doc_limpio))
+            
             row = self.cursor.fetchone()
             if row:
+                logger.info(f"✅ Cliente encontrado con documento: {row[3]}-{row[4]}")
                 return {
                     'idcliente': row[0],
                     'nombre': row[1],
-                    'apellidos': row[2]
+                    'apellidos': row[2],
+                    'tipo_documento': row[3],
+                    'num_documento': row[4]
                 }
+            
+            # Intentar 2: Buscar solo por el número (sin importar el tipo)
+            self.cursor.execute("""
+                SELECT idcliente, nombre, apellidos, tipo_documento, num_documento
+                FROM cliente 
+                WHERE REPLACE(num_documento, '-', '') = ?
+            """, (doc_limpio,))
+            
+            row = self.cursor.fetchone()
+            if row:
+                logger.info(f"✅ Cliente encontrado por número: {row[3]}-{row[4]}")
+                return {
+                    'idcliente': row[0],
+                    'nombre': row[1],
+                    'apellidos': row[2],
+                    'tipo_documento': row[3],
+                    'num_documento': row[4]
+                }
+            
+            logger.warning(f"❌ No se encontró cliente con documento: {num_documento}")
             return None
+            
         except Exception as e:
             logger.error(f"❌ Error al buscar documento {num_documento}: {e}")
             return None
