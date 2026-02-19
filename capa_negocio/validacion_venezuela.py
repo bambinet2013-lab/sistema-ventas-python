@@ -1,144 +1,133 @@
-"""
-Módulo de validación de documentos venezolanos
-- RIF (Registro de Información Fiscal)
-- Cédula de Identidad
-"""
+from datetime import datetime
 import re
-from loguru import logger
 
 class ValidacionVenezuela:
-    """Clase para validar documentos venezolanos (RIF y Cédula)"""
+    """Clase con métodos de validación para documentos venezolanos"""
     
-    # Letras válidas para RIF según SENIAT
-    LETRAS_RIF = {
-        'V': 'Persona natural venezolana',
-        'E': 'Persona natural extranjera',
-        'J': 'Persona jurídica (empresa)',
-        'G': 'Ente gubernamental',
-        'P': 'Pasaporte (no residente)',
-        'C': 'Consejo comunal / poder popular'
-    }
-    
-    @classmethod
-    def validar_cedula(cls, cedula: str) -> bool:
+    @staticmethod
+    def validar_cedula(cedula):
         """
-        Valida una cédula de identidad venezolana
-        Formato: 7-8 dígitos numéricos (puede incluir ceros a la izquierda)
+        Valida una cédula venezolana (formato: V12345678 o E12345678)
+        Retorna: (bool, mensaje_error)
         """
         if not cedula:
-            logger.warning("⚠️ Cédula vacía")
-            return False
+            return False, "La cédula no puede estar vacía"
         
-        # Limpiar espacios
-        cedula = cedula.strip()
+        # Patrón para cédula venezolana: V/E + 8 dígitos
+        patron = r'^[VE]\d{8}$'
+        if not re.match(patron, cedula):
+            return False, "Formato inválido. Debe ser V/E seguido de 8 dígitos (ej: V12345678)"
         
-        # Verificar que solo contenga números
-        if not cedula.isdigit():
-            logger.warning(f"⚠️ Cédula '{cedula}' contiene caracteres no numéricos")
-            return False
-        
-        # La cédula venezolana tiene entre 7 y 8 dígitos
-        # (algunas cédulas antiguas pueden tener menos, pero en sistema moderno usamos 7-8)
-        if len(cedula) < 7 or len(cedula) > 8:
-            logger.warning(f"⚠️ Cédula '{cedula}' debe tener 7 u 8 dígitos")
-            return False
-        
-        return True
+        return True, ""
     
-    @classmethod
-    def validar_rif(cls, rif: str) -> bool:
+    @staticmethod
+    def validar_rif(rif):
         """
-        Valida un RIF venezolano
-        Formato: L-XXXXXXXX-X
-        - Letra inicial: V, E, J, G, P, C
-        - 8 dígitos numéricos
-        - Dígito verificador (0-9)
+        Valida un RIF venezolano (formato: J123456789, G123456789, etc)
+        Retorna: (bool, mensaje_error)
         """
         if not rif:
-            logger.warning("⚠️ RIF vacío")
-            return False
+            return False, "El RIF no puede estar vacío"
         
-        # Limpiar espacios y convertir a mayúsculas
-        rif = rif.strip().upper()
+        # Patrón para RIF: letra + 9 dígitos
+        patron = r'^[JPGVE]\d{9}$'
+        if not re.match(patron, rif):
+            return False, "Formato inválido. Debe ser letra (J,P,G,V,E) seguida de 9 dígitos"
         
-        # Eliminar guiones para validar formato
-        rif_sin_guiones = rif.replace('-', '')
-        
-        # Verificar longitud total (10 caracteres: letra + 8 dígitos + 1 dígito verificador)
-        if len(rif_sin_guiones) != 10:
-            logger.warning(f"⚠️ RIF '{rif}' debe tener 10 caracteres (letra + 8 dígitos + 1 dígito)")
-            return False
-        
-        # Verificar que la letra inicial sea válida
-        letra = rif_sin_guiones[0]
-        if letra not in cls.LETRAS_RIF:
-            logger.warning(f"⚠️ Letra '{letra}' no válida. Debe ser: {', '.join(cls.LETRAS_RIF.keys())}")
-            return False
-        
-        # Verificar que los siguientes 8 caracteres sean dígitos
-        if not rif_sin_guiones[1:9].isdigit():
-            logger.warning(f"⚠️ RIF '{rif}' debe tener 8 dígitos después de la letra")
-            return False
-        
-        # Verificar que el último carácter sea dígito (verificador)
-        if not rif_sin_guiones[9].isdigit():
-            logger.warning(f"⚠️ El dígito verificador debe ser un número")
-            return False
-        
-        # Validar el dígito verificador usando el algoritmo oficial del SENIAT
-        if not cls._validar_digito_verificador(rif_sin_guiones):
-            logger.warning(f"⚠️ Dígito verificador incorrecto para RIF '{rif}'")
-            return False
-        
-        return True
+        return True, ""
     
-    @classmethod
-    def _validar_digito_verificador(cls, rif_sin_guiones: str) -> bool:
+    @staticmethod
+    def validar_fecha(fecha_str):
         """
-        Algoritmo oficial del SENIAT para validar el dígito verificador del RIF
+        Valida una fecha en formato DD/MM/YYYY
+        Retorna: (bool, datetime or None, mensaje_error)
         """
-        letra = rif_sin_guiones[0]
-        numeros = rif_sin_guiones[1:9]
-        digito_ingresado = int(rif_sin_guiones[9])
+        if not fecha_str or fecha_str.strip() == "":
+            return True, None, ""  # Fecha vacía es válida (opcional)
         
-        # Tabla de valores para cada letra
-        tabla_letras = {
-            'V': 4, 'E': 8, 'J': 12, 'P': 16, 'G': 20, 'C': 24
+        # Limpiar la fecha (quitar espacios)
+        fecha_str = fecha_str.strip()
+        
+        # Patrón para DD/MM/YYYY
+        patron = r'^(\d{1,2})/(\d{1,2})/(\d{4})$'
+        match = re.match(patron, fecha_str)
+        
+        if not match:
+            return False, None, "❌ Formato incorrecto. Use DD/MM/YYYY (ej: 15/05/1990)"
+        
+        dia, mes, año = map(int, match.groups())
+        
+        # Validar rangos básicos
+        if mes < 1 or mes > 12:
+            return False, None, "❌ Mes inválido (debe ser entre 01 y 12)"
+        
+        # Días por mes
+        dias_por_mes = {
+            1: 31, 2: 29, 3: 31, 4: 30, 5: 31, 6: 30,
+            7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
         }
         
-        if letra not in tabla_letras:
+        if dia < 1 or dia > dias_por_mes[mes]:
+            return False, None, f"❌ Día inválido para el mes {mes:02d} (máximo {dias_por_mes[mes]} días)"
+        
+        # Validación especial para febrero en años bisiestos
+        if mes == 2 and dia == 29:
+            if not ValidacionVenezuela._es_bisiesto(año):
+                return False, None, f"❌ El año {año} no es bisiesto, febrero solo tiene 28 días"
+        
+        # Validar que no sea fecha futura
+        try:
+            fecha_obj = datetime(año, mes, dia)
+            hoy = datetime.now()
+            
+            if fecha_obj > hoy:
+                return False, None, "❌ La fecha no puede ser futura"
+            
+        except ValueError:
+            return False, None, "❌ Fecha inválida (ej: 31/11/2023 no existe)"
+        
+        return True, fecha_obj, ""
+    
+    @staticmethod
+    def _es_bisiesto(año):
+        """Determina si un año es bisiesto"""
+        return (año % 4 == 0 and año % 100 != 0) or (año % 400 == 0)
+    
+    @staticmethod
+    def formatear_fecha_para_bd(fecha_obj):
+        """Convierte un objeto datetime a string YYYY-MM-DD para BD"""
+        if fecha_obj:
+            return fecha_obj.strftime('%Y-%m-%d')
+        return None
+    
+    @staticmethod
+    def validar_telefono(telefono):
+        """
+        Valida un teléfono venezolano
+        Acepta: 04141234567, 0414-1234567, +584141234567, etc
+        """
+        if not telefono:
+            return True  # Teléfono opcional
+        
+        # Limpiar el teléfono (quitar +, -, espacios)
+        telefono_limpio = re.sub(r'[\+\-\s]', '', telefono)
+        
+        # Verificar que sea solo números y tenga entre 10 y 12 dígitos
+        if not telefono_limpio.isdigit():
             return False
         
-        # Calcular suma ponderada
-        suma = tabla_letras[letra]
-        factores = [3, 2, 7, 6, 5, 4, 3, 2]
+        if len(telefono_limpio) < 10 or len(telefono_limpio) > 12:
+            return False
         
-        for i, digito in enumerate(numeros):
-            suma += int(digito) * factores[i]
-        
-        # Calcular dígito verificador
-        resto = suma % 11
-        digito_calculado = 11 - resto if resto > 1 else 0
-        
-        return digito_calculado == digito_ingresado
+        return True
     
-    @classmethod
-    def formatear_rif(cls, rif: str) -> str:
+    @staticmethod
+    def validar_email(email):
         """
-        Formatea un RIF al formato estándar L-XXXXXXXX-X
+        Valida un email
         """
-        rif = rif.strip().upper().replace('-', '')
-        if len(rif) == 10:
-            return f"{rif[0]}-{rif[1:9]}-{rif[9]}"
-        return rif
-    
-    @classmethod
-    def obtener_tipo_contribuyente(cls, rif: str) -> str:
-        """
-        Devuelve el tipo de contribuyente según la letra del RIF
-        """
-        if not rif:
-            return "Desconocido"
+        if not email:
+            return True  # Email opcional
         
-        letra = rif.strip().upper()[0]
-        return cls.LETRAS_RIF.get(letra, "Tipo no válido")
+        patron = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return re.match(patron, email) is not None

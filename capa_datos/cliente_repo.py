@@ -1,154 +1,270 @@
-from typing import List, Dict, Optional
+"""
+Repositorio para la gestión de clientes en la base de datos
+"""
 from loguru import logger
 
 class ClienteRepositorio:
-    """Repositorio para operaciones CRUD de clientes"""
+    """Clase que maneja las operaciones de base de datos para clientes"""
     
-    def __init__(self, conexion):
-        self.conexion = conexion
-        self.cursor = conexion.cursor()
+    def __init__(self, conn):
+        """
+        Inicializa el repositorio con una conexión a la base de datos
+        
+        Args:
+            conn: Conexión a la base de datos
+        """
+        self.conn = conn
     
-    def listar(self) -> List[Dict]:
-        """Lista todos los clientes"""
+    def _row_to_dict(self, row, description):
+        """
+        Convierte una fila de pyodbc a diccionario
+        """
+        if not row:
+            return None
+        return {desc[0]: value for desc, value in zip(description, row)}
+    
+    def _rows_to_dicts(self, rows, description):
+        """
+        Convierte múltiples filas de pyodbc a lista de diccionarios
+        """
+        if not rows:
+            return []
+        return [self._row_to_dict(row, description) for row in rows]
+    
+    def listar(self):
+        """
+        Lista todos los clientes activos
+        
+        Returns:
+            list: Lista de clientes o lista vacía si hay error
+        """
         try:
-            self.cursor.execute("""
-                SELECT idcliente, nombre, apellidos, sexo, 
-                       fecha_nacimiento, tipo_documento, num_documento,
-                       direccion, telefono, email
-                FROM cliente ORDER BY apellidos, nombre
-            """)
-            columnas = [column[0] for column in self.cursor.description]
-            resultados = []
-            for row in self.cursor.fetchall():
-                resultados.append(dict(zip(columnas, row)))
-            logger.info(f"✅ {len(resultados)} clientes listados")
-            return resultados
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idcliente, nombre, apellidos, fecha_nacimiento, 
+                   tipo_documento, num_documento, sexo, direccion, telefono, email
+            FROM cliente 
+            ORDER BY idcliente DESC
+            """
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            description = cursor.description
+            return self._rows_to_dicts(rows, description)
         except Exception as e:
-            logger.error(f"❌ Error al listar clientes: {e}")
+            logger.error(f"Error al listar clientes: {e}")
             return []
     
-    def obtener_por_id(self, idcliente: int) -> Optional[Dict]:
-        """Obtiene un cliente por su ID"""
-        try:
-            self.cursor.execute(
-                "SELECT * FROM cliente WHERE idcliente = ?",
-                (idcliente,)
-            )
-            row = self.cursor.fetchone()
-            if row:
-                columnas = [column[0] for column in self.cursor.description]
-                return dict(zip(columnas, row))
-            return None
-        except Exception as e:
-            logger.error(f"❌ Error al obtener cliente {idcliente}: {e}")
-            return None
-    
-    def buscar_por_documento(self, num_documento: str) -> Optional[Dict]:
+    def obtener_por_id(self, idcliente):
         """
-        Busca un cliente por número de documento (formato flexible)
-        Acepta: V12345678, V-12345678, v12345678, etc.
+        Obtiene un cliente por su ID
+        
+        Args:
+            idcliente (int): ID del cliente
+            
+        Returns:
+            dict: Datos del cliente o None si no existe
         """
         try:
-            # Limpiar el documento: quitar guiones y espacios, convertir a mayúsculas
-            doc_limpio = num_documento.replace('-', '').replace(' ', '').upper()
-            
-            logger.info(f"🔍 Buscando documento: original='{num_documento}', limpio='{doc_limpio}'")
-            
-            # Intentar 1: Buscar por el formato exacto como está en la BD (puede ser con o sin guión)
-            self.cursor.execute("""
-                SELECT idcliente, nombre, apellidos, tipo_documento, num_documento
-                FROM cliente 
-                WHERE (tipo_documento + '-' + num_documento) = ? 
-                   OR (tipo_documento + num_documento) = ?
-                   OR num_documento = ?
-            """, (num_documento, doc_limpio, doc_limpio))
-            
-            row = self.cursor.fetchone()
-            if row:
-                logger.info(f"✅ Cliente encontrado con documento: {row[3]}-{row[4]}")
-                return {
-                    'idcliente': row[0],
-                    'nombre': row[1],
-                    'apellidos': row[2],
-                    'tipo_documento': row[3],
-                    'num_documento': row[4]
-                }
-            
-            # Intentar 2: Buscar solo por el número (sin importar el tipo)
-            self.cursor.execute("""
-                SELECT idcliente, nombre, apellidos, tipo_documento, num_documento
-                FROM cliente 
-                WHERE REPLACE(num_documento, '-', '') = ?
-            """, (doc_limpio,))
-            
-            row = self.cursor.fetchone()
-            if row:
-                logger.info(f"✅ Cliente encontrado por número: {row[3]}-{row[4]}")
-                return {
-                    'idcliente': row[0],
-                    'nombre': row[1],
-                    'apellidos': row[2],
-                    'tipo_documento': row[3],
-                    'num_documento': row[4]
-                }
-            
-            logger.warning(f"❌ No se encontró cliente con documento: {num_documento}")
-            return None
-            
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idcliente, nombre, apellidos, fecha_nacimiento, 
+                   tipo_documento, num_documento, sexo, direccion, telefono, email
+            FROM cliente 
+            WHERE idcliente = ?
+            """
+            cursor.execute(query, (idcliente,))
+            row = cursor.fetchone()
+            description = cursor.description
+            return self._row_to_dict(row, description)
         except Exception as e:
-            logger.error(f"❌ Error al buscar documento {num_documento}: {e}")
+            logger.error(f"Error al obtener cliente {idcliente}: {e}")
             return None
     
-    def insertar(self, nombre: str, apellidos: str, fecha_nacimiento, 
-                 tipo_documento: str, num_documento: str,
-                 sexo: str = None, direccion: str = None, 
-                 telefono: str = None, email: str = None) -> bool:
-        """Inserta un nuevo cliente"""
+    def buscar_por_documento(self, tipo_documento, num_documento):
+        """
+        Busca un cliente por tipo y número de documento
+        
+        Args:
+            tipo_documento (str): Tipo de documento (V, E, J, G, C)
+            num_documento (str): Número de documento
+            
+        Returns:
+            dict: Datos del cliente o None si no existe
+        """
         try:
-            self.cursor.execute(
-                """INSERT INTO cliente 
-                   (nombre, apellidos, sexo, fecha_nacimiento, tipo_documento, 
-                    num_documento, direccion, telefono, email) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (nombre, apellidos, sexo, fecha_nacimiento, tipo_documento,
-                 num_documento, direccion, telefono, email)
-            )
-            self.cursor.commit()
-            logger.success(f"✅ Cliente '{nombre} {apellidos}' insertado")
-            return True
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idcliente, nombre, apellidos, fecha_nacimiento, 
+                   tipo_documento, num_documento
+            FROM cliente 
+            WHERE tipo_documento = ? AND num_documento = ?
+            """
+            cursor.execute(query, (tipo_documento, num_documento))
+            row = cursor.fetchone()
+            description = cursor.description
+            return self._row_to_dict(row, description)
         except Exception as e:
-            logger.error(f"❌ Error al insertar cliente: {e}")
+            logger.error(f"Error al buscar cliente por documento {tipo_documento}-{num_documento}: {e}")
+            return None
+    
+    def crear(self, nombre, apellidos, fecha_nacimiento, tipo_documento, 
+              num_documento, sexo=None, direccion=None, telefono=None, email=None):
+        """
+        Inserta un nuevo cliente (fecha_nacimiento puede ser NULL)
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            query = """
+            INSERT INTO cliente 
+            (nombre, apellidos, fecha_nacimiento, tipo_documento, num_documento, 
+             sexo, direccion, telefono, email)
+            OUTPUT INSERTED.idcliente
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            cursor.execute(query, (
+                nombre, apellidos, fecha_nacimiento, tipo_documento, num_documento,
+                sexo, direccion, telefono, email
+            ))
+            
+            row = cursor.fetchone()
+            idcliente = row[0] if row else None
+            self.conn.commit()
+            
+            if idcliente:
+                logger.info(f"✅ Cliente creado con ID: {idcliente}")
+                return idcliente
+            return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error al crear cliente: {e}")
+            self.conn.rollback()
+            return None
+    
+    def actualizar(self, idcliente, nombre, apellidos, fecha_nacimiento, tipo_documento,
+                   num_documento, sexo=None, direccion=None, telefono=None, email=None):
+        """
+        Actualiza un cliente existente
+        
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            UPDATE cliente 
+            SET nombre = ?, apellidos = ?, fecha_nacimiento = ?,
+                tipo_documento = ?, num_documento = ?, sexo = ?,
+                direccion = ?, telefono = ?, email = ?
+            WHERE idcliente = ?
+            """
+            cursor.execute(query, (
+                nombre, apellidos, fecha_nacimiento, tipo_documento, num_documento,
+                sexo, direccion, telefono, email, idcliente
+            ))
+            self.conn.commit()
+            afectadas = cursor.rowcount
+            if afectadas > 0:
+                logger.info(f"✅ Cliente {idcliente} actualizado correctamente")
+                return True
+            else:
+                logger.warning(f"⚠️ No se encontró el cliente {idcliente} para actualizar")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error al actualizar cliente {idcliente}: {e}")
+            self.conn.rollback()
             return False
     
-    def actualizar(self, idcliente: int, nombre: str, apellidos: str, 
-                   fecha_nacimiento, tipo_documento: str, num_documento: str,
-                   sexo: str = None, direccion: str = None, 
-                   telefono: str = None, email: str = None) -> bool:
-        """Actualiza un cliente existente"""
+    def eliminar(self, idcliente):
+        """
+        Elimina un cliente (físicamente de la BD)
+        
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
         try:
-            self.cursor.execute(
-                """UPDATE cliente 
-                   SET nombre = ?, apellidos = ?, sexo = ?, fecha_nacimiento = ?,
-                       tipo_documento = ?, num_documento = ?, direccion = ?,
-                       telefono = ?, email = ?
-                   WHERE idcliente = ?""",
-                (nombre, apellidos, sexo, fecha_nacimiento, tipo_documento,
-                 num_documento, direccion, telefono, email, idcliente)
-            )
-            self.cursor.commit()
-            logger.success(f"✅ Cliente ID {idcliente} actualizado")
-            return True
+            cursor = self.conn.cursor()
+            
+            # Verificar si el cliente tiene ventas asociadas
+            check_query = "SELECT COUNT(*) as total FROM venta WHERE idcliente = ?"
+            cursor.execute(check_query, (idcliente,))
+            row = cursor.fetchone()
+            total = row[0] if row else 0
+            
+            if total > 0:
+                logger.warning(f"⚠️ Cliente {idcliente} tiene ventas asociadas. No se puede eliminar")
+                return False
+            
+            # Eliminación física
+            query = "DELETE FROM cliente WHERE idcliente = ?"
+            cursor.execute(query, (idcliente,))
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Cliente {idcliente} eliminado correctamente")
+                return True
+            else:
+                logger.warning(f"⚠️ No se encontró el cliente {idcliente} para eliminar")
+                return False
+                
         except Exception as e:
-            logger.error(f"❌ Error al actualizar cliente: {e}")
+            logger.error(f"❌ Error al eliminar cliente {idcliente}: {e}")
+            self.conn.rollback()
             return False
     
-    def eliminar(self, idcliente: int) -> bool:
-        """Elimina un cliente"""
+    def buscar_por_nombre(self, termino):
+        """
+        Busca clientes por nombre o apellido (búsqueda parcial)
+        """
         try:
-            self.cursor.execute("DELETE FROM cliente WHERE idcliente = ?", (idcliente,))
-            self.cursor.commit()
-            logger.success(f"✅ Cliente ID {idcliente} eliminado")
-            return True
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idcliente, nombre, apellidos, fecha_nacimiento, 
+                   tipo_documento, num_documento, telefono, email
+            FROM cliente 
+            WHERE nombre LIKE ? OR apellidos LIKE ?
+            ORDER BY nombre, apellidos
+            """
+            busqueda = f"%{termino}%"
+            cursor.execute(query, (busqueda, busqueda))
+            rows = cursor.fetchall()
+            description = cursor.description
+            return self._rows_to_dicts(rows, description)
         except Exception as e:
-            logger.error(f"❌ Error al eliminar cliente: {e}")
-            return False
+            logger.error(f"Error al buscar clientes por nombre '{termino}': {e}")
+            return []
+    
+    def contar_clientes(self):
+        """
+        Cuenta el número total de clientes
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = "SELECT COUNT(*) as total FROM cliente"
+            cursor.execute(query)
+            row = cursor.fetchone()
+            return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Error al contar clientes: {e}")
+            return 0
+    
+    def clientes_recientes(self, limite=10):
+        """
+        Obtiene los clientes más recientes
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT TOP (?) idcliente, nombre, apellidos, fecha_nacimiento, 
+                   tipo_documento, num_documento, telefono, email
+            FROM cliente 
+            ORDER BY idcliente DESC
+            """
+            cursor.execute(query, (limite,))
+            rows = cursor.fetchall()
+            description = cursor.description
+            return self._rows_to_dicts(rows, description)
+        except Exception as e:
+            logger.error(f"Error al obtener clientes recientes: {e}")
+            return []
