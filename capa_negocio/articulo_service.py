@@ -30,46 +30,48 @@ class ArticuloService(BaseService):
             return None
         return self.repositorio.buscar_por_codigo(codigo)
     
-    def crear(self, codigo: str, nombre: str, idcategoria: int,
-              idpresentacion: int, descripcion: str = None, imagen=None) -> bool:
-        """Crea un nuevo artículo con validaciones"""
-        
-        # Validaciones
-        if not self.validar_requerido(codigo, "código"):
-            return False
-        if not self.validar_requerido(nombre, "nombre"):
-            return False
-        if not self.validar_entero_positivo(idcategoria, "categoría"):
-            return False
-        if not self.validar_entero_positivo(idpresentacion, "presentación"):
-            return False
-        
-        if not self.validar_longitud(codigo, "código", max_len=50):
-            return False
-        if not self.validar_longitud(nombre, "nombre", max_len=100):
-            return False
-        if descripcion and not self.validar_longitud(descripcion, "descripción", max_len=256):
-            return False
-        
-        # Validar que existan categoría y presentación
-        if self.categoria_service:
-            categoria = self.categoria_service.obtener_por_id(idcategoria)
-            if not categoria:
-                logger.warning(f"⚠️ La categoría {idcategoria} no existe")
-                return False
-        
-        if self.presentacion_service:
-            presentacion = self.presentacion_service.obtener_por_id(idpresentacion)
-            if not presentacion:
-                logger.warning(f"⚠️ La presentación {idpresentacion} no existe")
-                return False
-        
+    def crear(self, codigo, nombre, idcategoria, idpresentacion, descripcion=None):
+        """
+        Crea un nuevo artículo
+        """
         try:
-            return self.repositorio.insertar(
-                codigo.strip(), nombre.strip(),
-                idcategoria, idpresentacion,
-                descripcion, imagen
+            # Validaciones
+            if not codigo or not codigo.strip():
+                logger.error("El código del artículo es obligatorio")
+                return False
+            
+            if not nombre or not nombre.strip():
+                logger.error("El nombre del artículo es obligatorio")
+                return False
+            
+            if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
+                return False
+            
+            if not self.validar_entero_positivo(idpresentacion, "ID de presentación"):
+                return False
+            
+            # Verificar si ya existe un artículo con el mismo código
+            existente = self.repositorio.buscar_por_codigo(codigo)
+            if existente:
+                logger.error(f"Ya existe un artículo con el código {codigo}")
+                return False
+            
+            # Crear artículo - LLAMADA CORRECTA
+            resultado = self.repositorio.crear(  # <--- DEBE SER 'crear', no 'insertar'
+                codigo=codigo.strip(),
+                nombre=nombre.strip(),
+                idcategoria=idcategoria,
+                idpresentacion=idpresentacion,
+                descripcion=descripcion.strip() if descripcion else None
             )
+            
+            if resultado:
+                logger.info(f"✅ Artículo creado: {nombre}")
+                return True
+            else:
+                logger.error("No se pudo crear el artículo")
+                return False
+                
         except Exception as e:
             logger.error(f"❌ Error al crear artículo: {e}")
             return False

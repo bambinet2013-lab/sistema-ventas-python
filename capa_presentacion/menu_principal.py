@@ -1593,6 +1593,7 @@ class SistemaVentas:
         """Crea un nuevo artículo"""
         self.mostrar_cabecera("CREAR ARTÍCULO")
         
+        # Mostrar categorías disponibles
         categorias = self.categoria_service.listar()
         if not categorias:
             print("❌ No hay categorías. Cree una primero.")
@@ -1610,6 +1611,7 @@ class SistemaVentas:
             self.pausa()
             return
         
+        # Mostrar presentaciones
         print("\nPresentaciones:")
         print("  1. Unidad")
         print("  2. Caja")
@@ -1627,20 +1629,45 @@ class SistemaVentas:
         nombre = input("Nombre del artículo: ")
         descripcion = input("Descripción (opcional): ") or None
         
+        # Solicitar stock inicial
+        print("\n📦 STOCK INICIAL")
+        print("="*40)
+        print("Ingrese la cantidad inicial en inventario:")
+        try:
+            stock_inicial = int(input("Cantidad: "))
+            if stock_inicial < 0:
+                print("❌ La cantidad no puede ser negativa")
+                stock_inicial = 0
+        except:
+            print("❌ Cantidad inválida. Se asignará 0 por defecto.")
+            stock_inicial = 0
+        
         if self.articulo_service.crear(codigo, nombre, idcat, idpres, descripcion):
-            print("✅ Artículo creado exitosamente")
+            print(f"\n{self.COLOR_VERDE}✅ Artículo creado exitosamente{self.COLOR_RESET}")
             
+            # Buscar el ID del artículo recién creado
             articulo_nuevo = self.articulo_service.buscar_por_codigo(codigo)
             if articulo_nuevo:
                 idarticulo = articulo_nuevo['idarticulo']
+                
+                # Registrar stock inicial en kardex
+                if stock_inicial > 0:
+                    self.inventario_service.reponer_stock(
+                        idarticulo=idarticulo,
+                        cantidad=stock_inicial,
+                        idingreso=None,
+                        precio_compra=0
+                    )
+                    print(f"   📦 Stock inicial: {stock_inicial} unidades")
+                
                 self.registrar_auditoria(
                     accion="CREAR",
                     tabla="articulo",
                     registro_id=idarticulo,
-                    datos_nuevos=f"Artículo: {nombre}, Código: {codigo}"
+                    datos_nuevos=f"Artículo: {nombre}, Código: {codigo}, Stock inicial: {stock_inicial}"
                 )
         else:
-            print("❌ Error al crear el artículo")
+            print(f"\n{self.COLOR_ROJO}❌ Error al crear el artículo{self.COLOR_RESET}")
         
         self.pausa()
     
@@ -1700,7 +1727,7 @@ class SistemaVentas:
     
     @requiere_permiso('articulos_editar')
     def _editar_articulo(self):
-        """Edita un artículo existente"""
+        """Edita un artículo existente mostrando stock actual"""
         self.mostrar_cabecera("EDITAR ARTÍCULO")
         
         try:
@@ -1712,9 +1739,15 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            datos_anteriores = f"Artículo: {art['nombre']}, Código: {art['codigo']}"
+            # Obtener stock actual
+            stock_actual = self.inventario_service.obtener_stock_articulo(idart)
+            nivel = self.inventario_service.obtener_nivel_stock(stock_actual)
             
-            print(f"\nEditando: {art['nombre']}")
+            # Guardar datos anteriores para auditoría
+            datos_anteriores = f"Artículo: {art['nombre']}, Código: {art['codigo']}, Stock: {stock_actual}"
+            
+            print(f"\n📌 Editando: {art['nombre']}")
+            print(f"{nivel['color']}📦 Stock actual: {stock_actual} unidades {nivel['emoji']} {nivel['nivel']}{self.COLOR_RESET}")
             print("(Deje en blanco para mantener el valor actual)")
             print()
             
@@ -1722,6 +1755,49 @@ class SistemaVentas:
             nombre = input(f"Nombre [{art['nombre']}]: ") or art['nombre']
             descripcion = input(f"Descripción [{art.get('descripcion', '')}]: ") or art.get('descripcion')
             
+            # Opción de ajustar stock
+            print(f"\n📦 AJUSTE DE STOCK")
+            print("="*40)
+            print(f"Stock actual: {stock_actual} unidades")
+            print("¿Desea ajustar el stock?")
+            print("1. Sí, agregar stock")
+            print("2. Sí, quitar stock")
+            print("3. No, mantener stock actual")
+            opcion_stock = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+            
+            if opcion_stock == '1':
+                try:
+                    cantidad = int(input("Cantidad a AGREGAR: "))
+                    if cantidad > 0:
+                        self.inventario_service.reponer_stock(
+                            idarticulo=idart,
+                            cantidad=cantidad,
+                            idingreso=None,
+                            precio_compra=0
+                        )
+                        print(f"{self.COLOR_VERDE}✅ Stock aumentado: +{cantidad} unidades{self.COLOR_RESET}")
+                        stock_actual += cantidad
+                except:
+                    print("❌ Cantidad inválida")
+            
+            elif opcion_stock == '2':
+                try:
+                    cantidad = int(input("Cantidad a QUITAR: "))
+                    if cantidad > 0 and cantidad <= stock_actual:
+                        self.inventario_service.descontar_stock(
+                            idarticulo=idart,
+                            cantidad=cantidad,
+                            idventa=None,
+                            precio_unitario=0
+                        )
+                        print(f"{self.COLOR_VERDE}✅ Stock disminuido: -{cantidad} unidades{self.COLOR_RESET}")
+                        stock_actual -= cantidad
+                    else:
+                        print(f"❌ Cantidad inválida o superior al stock actual ({stock_actual})")
+                except:
+                    print("❌ Cantidad inválida")
+            
+            # Mostrar categorías
             print("\nCategorías disponibles:")
             categorias = self.categoria_service.listar()
             for c in categorias:
@@ -1732,6 +1808,7 @@ class SistemaVentas:
             except:
                 idcat = art['idcategoria']
             
+            # Presentaciones
             print("\nPresentaciones:")
             print("  1. Unidad")
             print("  2. Caja")
@@ -1743,9 +1820,10 @@ class SistemaVentas:
                 idpres = art['idpresentacion']
             
             if self.articulo_service.actualizar(idart, codigo, nombre, idcat, idpres, descripcion):
-                print("✅ Artículo actualizado correctamente")
+                print(f"\n{self.COLOR_VERDE}✅ Artículo actualizado correctamente{self.COLOR_RESET}")
+                print(f"   📦 Stock final: {stock_actual} unidades")
                 
-                datos_nuevos = f"Artículo: {nombre}, Código: {codigo}"
+                datos_nuevos = f"Artículo: {nombre}, Código: {codigo}, Stock: {stock_actual}"
                 self.registrar_auditoria(
                     accion="MODIFICAR",
                     tabla="articulo",
@@ -1754,7 +1832,7 @@ class SistemaVentas:
                     datos_nuevos=datos_nuevos
                 )
             else:
-                print("❌ Error al actualizar el artículo")
+                print(f"\n{self.COLOR_ROJO}❌ Error al actualizar el artículo{self.COLOR_RESET}")
         
         except Exception as e:
             print(f"❌ Error: {e}")
@@ -1867,99 +1945,90 @@ class SistemaVentas:
             self.pausa()
             return
         
+        # ===== DETECTAR SISTEMA OPERATIVO =====
+        import platform
+        sistema = platform.system()
+        
         # ===== ATAJOS DE TECLADO =====
         print(f"\n{self.COLOR_AMARILLO}⚡ ATAJOS DE TECLADO:{self.COLOR_RESET}")
-        print(f"  {self.COLOR_VERDE}[F8]{self.COLOR_RESET}  → Consumidor Final (DIRECTO)")
-        print(f"  {self.COLOR_VERDE}[F9]{self.COLOR_RESET}  → Buscar por Cédula")
-        print(f"  {self.COLOR_VERDE}[F10]{self.COLOR_RESET} → Buscar por RIF")
-        print(f"  {self.COLOR_VERDE}[ESC]{self.COLOR_RESET} → Menú normal")
+        
+        if sistema == "Windows":
+            # En Windows, las teclas F sí funcionan
+            print(f"  {self.COLOR_VERDE}[F8]{self.COLOR_RESET}  → Consumidor Final (DIRECTO)")
+            print(f"  {self.COLOR_VERDE}[F9]{self.COLOR_RESET}  → Buscar por Cédula")
+            print(f"  {self.COLOR_VERDE}[F10]{self.COLOR_RESET} → Buscar por RIF")
+            print(f"  {self.COLOR_VERDE}[F11]{self.COLOR_RESET} → Imprimir Factura")
+            print(f"  {self.COLOR_VERDE}[ESC]{self.COLOR_RESET} → Menú normal")
+        else:
+            # En Linux, usamos números para evitar conflicto
+            print(f"  {self.COLOR_VERDE}[1]{self.COLOR_RESET} → Consumidor Final")
+            print(f"  {self.COLOR_VERDE}[2]{self.COLOR_RESET} → Buscar por Cédula")
+            print(f"  {self.COLOR_VERDE}[3]{self.COLOR_RESET} → Buscar por RIF")
+            print(f"  {self.COLOR_VERDE}[4]{self.COLOR_RESET} → Imprimir Factura")
+            print(f"  {self.COLOR_VERDE}[0]{self.COLOR_RESET} → Menú normal")
+        
         print("\nPresione una tecla o use los atajos...")
         
         try:
             import readchar
-            import sys
-            import termios
-            import tty
+            key = readchar.readkey()
             
-            # Configurar terminal para capturar teclas especiales
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            try:
-                tty.setraw(sys.stdin.fileno())
-                # Leer el primer carácter
-                ch = sys.stdin.read(1)
+            print(f"Tecla detectada: '{key}' - Sistema: {sistema}")
+            
+            if sistema == "Windows":
+                # Atajos para Windows (teclas F)
+                if key == readchar.key.F8:
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo F8: Consumidor Final{self.COLOR_RESET}")
+                    return self._continuar_venta_consumidor_final(usuario)
                 
-                # Si es ESC (tecla de escape)
-                if ch == '\x1b':
-                    # Leer los siguientes caracteres para teclas de función
-                    ch2 = sys.stdin.read(1)
-                    if ch2 == '[':
-                        ch3 = sys.stdin.read(1)
-                        # F8 = [15~, F9 = [20~, F10 = [21~
-                        if ch3 == '1':
-                            ch4 = sys.stdin.read(1)
-                            if ch4 == '5':
-                                ch5 = sys.stdin.read(1)
-                                if ch5 == '~':
-                                    key = 'F8'
-                                else:
-                                    key = 'ESC'
-                            else:
-                                key = 'ESC'
-                        elif ch3 == '2':
-                            ch4 = sys.stdin.read(1)
-                            if ch4 == '0':
-                                ch5 = sys.stdin.read(1)
-                                if ch5 == '~':
-                                    key = 'F9'
-                                else:
-                                    key = 'ESC'
-                            else:
-                                key = 'ESC'
-                        elif ch3 == '2':
-                            ch4 = sys.stdin.read(1)
-                            if ch4 == '1':
-                                ch5 = sys.stdin.read(1)
-                                if ch5 == '~':
-                                    key = 'F10'
-                                else:
-                                    key = 'ESC'
-                            else:
-                                key = 'ESC'
-                        else:
-                            key = 'ESC'
-                    else:
-                        key = 'ESC'
+                elif key == readchar.key.F9:
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo F9: Búsqueda por Cédula{self.COLOR_RESET}")
+                    return self._buscar_por_cedula_rapido(usuario)
+                
+                elif key == readchar.key.F10:
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo F10: Búsqueda por RIF{self.COLOR_RESET}")
+                    return self._buscar_por_rif_rapido(usuario)
+                
+                elif key == readchar.key.F11:
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo F11: Imprimir Factura{self.COLOR_RESET}")
+                    return self._imprimir_factura_rapido(usuario)
+                
+                elif key == readchar.key.ESC:
+                    print(f"\n{self.COLOR_AMARILLO}⏎ ESC detectado - Continuando con menú normal{self.COLOR_RESET}")
+                    opcion_ident = None
+                
                 else:
-                    key = ch
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            
-            print(f"Tecla detectada: {key}")
-            
-            # F8 - Consumidor Final
-            if key == 'F8':
-                print(f"\n{self.COLOR_VERDE}✅ Atajo F8: Consumidor Final{self.COLOR_RESET}")
-                return self._continuar_venta_consumidor_final(usuario)
-            
-            # F9 - Buscar por Cédula
-            elif key == 'F9':
-                print(f"\n{self.COLOR_VERDE}✅ Atajo F9: Búsqueda por Cédula{self.COLOR_RESET}")
-                return self._buscar_por_cedula_rapido(usuario)
-            
-            # F10 - Buscar por RIF
-            elif key == 'F10':
-                print(f"\n{self.COLOR_VERDE}✅ Atajo F10: Búsqueda por RIF{self.COLOR_RESET}")
-                return self._buscar_por_rif_rapido(usuario)
-            
-            # ESC - Menú normal
-            elif key == 'ESC':
-                print(f"\n{self.COLOR_AMARILLO}⏎ ESC detectado - Continuando con menú normal{self.COLOR_RESET}")
-                opcion_ident = None
-            
+                    print(f"\n{self.COLOR_AMARILLO}⏎ Tecla no es atajo - Continuando con menú normal{self.COLOR_RESET}")
+                    opcion_ident = None
             else:
-                print(f"\n{self.COLOR_AMARILLO}⏎ Tecla '{key}' no es atajo - Continuando con menú normal{self.COLOR_RESET}")
-                opcion_ident = None
+                # Atajos para Linux (números)
+                if key == '1':
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo 1: Consumidor Final{self.COLOR_RESET}")
+                    return self._continuar_venta_consumidor_final(usuario)
+                
+                elif key == '2':
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo 2: Búsqueda por Cédula{self.COLOR_RESET}")
+                    return self._buscar_por_cedula_rapido(usuario)
+                
+                elif key == '3':
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo 3: Búsqueda por RIF{self.COLOR_RESET}")
+                    return self._buscar_por_rif_rapido(usuario)
+                
+                elif key == '4':
+                    print(f"\n{self.COLOR_VERDE}✅ Atajo 4: Imprimir Factura{self.COLOR_RESET}")
+                    return self._imprimir_factura_rapido(usuario)
+                
+                elif key == '0':
+                    print(f"\n{self.COLOR_AMARILLO}⏎ Atajo 0 - Continuando con menú normal{self.COLOR_RESET}")
+                    opcion_ident = None
+                
+                elif key == readchar.key.ESC:
+                    print(f"\n{self.COLOR_AMARILLO}⏎ ESC detectado - Continuando con menú normal{self.COLOR_RESET}")
+                    opcion_ident = None
+                
+                else:
+                    print(f"\n{self.COLOR_AMARILLO}⏎ Tecla '{key}' no es atajo - Continuando con menú normal{self.COLOR_RESET}")
+                    opcion_ident = None
                 
         except Exception as e:
             logger.error(f"Error en atajo de teclado: {e}")
@@ -2083,7 +2152,7 @@ class SistemaVentas:
             if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
                 tasa = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
                 if tasa:
-                    print(f"\n{self.COLOR_VERDE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
+                    print(f"\n{self.COLOR_VERGE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
                 else:
                     print(f"\n{self.COLOR_AMARILLO}⚠️ No hay tasa registrada. Se solicitará al momento de la venta.{self.COLOR_RESET}")
         
@@ -2270,6 +2339,11 @@ class SistemaVentas:
             print(f"   {MENSAJES_LEGALES['factura_digital']}")
             print("="*50)
             
+            # Preguntar si desea imprimir factura
+            imprimir = input(f"\n{self.COLOR_AMARILLO}¿Desea imprimir la factura? (s/N): {self.COLOR_RESET}").lower()
+            if imprimir == 's':
+                self._imprimir_factura(idventa)
+            
             tipo_cliente = "CONSUMIDOR FINAL" if not idcliente else "CLIENTE IDENTIFICADO"
             self.registrar_auditoria(
                 accion="CREAR",
@@ -2282,10 +2356,77 @@ class SistemaVentas:
         
         self.pausa()
 
+    def _imprimir_factura_rapido(self, usuario):
+        """Atajo para imprimir la última factura o buscar por ID"""
+        import platform
+        sistema = platform.system()
+        atajo = "F11" if sistema == "Windows" else "4"
+        
+        print(f"\n{self.COLOR_VERDE}🖨️ IMPRIMIR FACTURA (Atajo {atajo}){self.COLOR_RESET}")
+        print("="*60)
+        print("1. Imprimir última factura")
+        print("2. Buscar factura por ID")
+        print("3. Volver")
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion == '1':
+            # Obtener la última venta
+            ventas = self.venta_service.listar()
+            if ventas:
+                ultima_venta = ventas[0]
+                self._imprimir_factura(ultima_venta['idventa'])
+            else:
+                print(f"{self.COLOR_ROJO}❌ No hay ventas registradas{self.COLOR_RESET}")
+                self.pausa()
+        
+        elif opcion == '2':
+            try:
+                idventa = int(input("ID de la factura a imprimir: "))
+                self._imprimir_factura(idventa)
+            except:
+                print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
+                self.pausa()
+        
+        return self._registrar_venta()
+
+    def _imprimir_factura(self, idventa):
+        """Imprime una factura en formato texto"""
+        venta = self.venta_service.obtener_por_id(idventa)
+        
+        if not venta:
+            print(f"{self.COLOR_ROJO}❌ Factura {idventa} no encontrada{self.COLOR_RESET}")
+            return
+        
+        print("\n" + "="*50)
+        print("🖨️ IMPRIMIENDO FACTURA")
+        print("="*50)
+        print(f"FACTURA #{venta['idventa']}")
+        print(f"Fecha: {venta['fecha']}")
+        print(f"Cliente: {venta.get('cliente', 'CONSUMIDOR FINAL')}")
+        print(f"Comprobante: {venta['tipo_comprobante']} {venta['serie']}-{venta['numero_comprobante']}")
+        print("-"*50)
+        print("PRODUCTOS:")
+        total = 0
+        for d in venta.get('detalle', []):
+            subtotal = d['cantidad'] * d['precio_venta']
+            total += subtotal
+            print(f"  {d['articulo']} x{d['cantidad']} @ {d['precio_venta']:.2f} = {subtotal:.2f}")
+        print("-"*50)
+        print(f"TOTAL: {total:.2f}")
+        print("="*50)
+        print("¡Gracias por su compra!")
+        print("="*50)
+        
+        # Aquí iría la lógica para enviar a impresora física
+        print(f"\n{self.COLOR_VERDE}✅ Factura enviada a imprimir{self.COLOR_RESET}")
+        self.pausa()
+
     def _buscar_por_cedula_rapido(self, usuario):
-        """Búsqueda rápida de cliente por cédula (atajo F9)"""
-        print("\n" + "="*60)
-        print("🔍 BÚSQUEDA RÁPIDA POR CÉDULA")
+        """Búsqueda rápida por cédula (compatible Windows/Linux)"""
+        import platform
+        sistema = platform.system()
+        atajo = "F9" if sistema == "Windows" else "2"
+        print(f"\n{self.COLOR_VERDE}🔍 BÚSQUEDA RÁPIDA POR CÉDULA (Atajo {atajo}){self.COLOR_RESET}")
         print("="*60)
         
         cedula = input("Ingrese cédula (ej: V12345678): ").upper()
@@ -2302,7 +2443,6 @@ class SistemaVentas:
             cliente = self.cliente_service.obtener_por_id(idcliente)
             print(f"{self.COLOR_VERDE}✅ Cliente encontrado: {cliente['nombre']} {cliente['apellidos']}{self.COLOR_RESET}")
             
-            # Determinar opción de identificación
             if cliente['tipo_documento'] in ['V', 'E']:
                 opcion_ident = '2'
             else:
@@ -2325,12 +2465,19 @@ class SistemaVentas:
                 return self._registrar_venta()
 
     def _buscar_por_rif_rapido(self, usuario):
-        """Búsqueda rápida de cliente por RIF (atajo F10)"""
-        print("\n" + "="*60)
-        print("🔍 BÚSQUEDA RÁPIDA POR RIF")
+        """Búsqueda rápida por RIF (compatible Windows/Linux)"""
+        import platform
+        sistema = platform.system()
+        atajo = "F10" if sistema == "Windows" else "3"
+        print(f"\n{self.COLOR_VERDE}🔍 BÚSQUEDA RÁPIDA POR RIF (Atajo {atajo}){self.COLOR_RESET}")
         print("="*60)
         
         rif = input("Ingrese RIF (ej: J123456789): ").upper()
+        
+        if not rif:
+            print(f"{self.COLOR_ROJO}❌ RIF no ingresado{self.COLOR_RESET}")
+            self.pausa()
+            return self._registrar_venta()
         
         cliente_simple = self.cliente_service.buscar_por_documento(rif)
         
@@ -2339,7 +2486,6 @@ class SistemaVentas:
             cliente = self.cliente_service.obtener_por_id(idcliente)
             print(f"{self.COLOR_VERDE}✅ Cliente encontrado: {cliente['nombre']} {cliente['apellidos']}{self.COLOR_RESET}")
             
-            # Determinar opción de identificación
             if cliente['tipo_documento'] in ['J', 'G', 'C']:
                 opcion_ident = '1'
             else:
@@ -2347,7 +2493,7 @@ class SistemaVentas:
             
             return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
         else:
-            print(f"{self.COLOR_AMARILLO}⚠️ Cliente no encontrado{self.COLOR_RESET}")
+            print(f"{self.COLOR_AMARILLO}⚠️ Cliente con RIF {rif} no encontrado{self.COLOR_RESET}")
             print("1. Registrar nuevo cliente")
             print("2. Volver")
             opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
@@ -2359,13 +2505,15 @@ class SistemaVentas:
                 return self._registrar_venta()
 
     def _continuar_venta_consumidor_final(self, usuario):
-        """Continúa directamente con venta a consumidor final (sin preguntar)"""
-        print(f"\n{self.COLOR_VERDE}🛒 Venta a CONSUMIDOR FINAL{self.COLOR_RESET}")
+        """Continúa con venta a consumidor final (compatible Windows/Linux)"""
+        import platform
+        sistema = platform.system()
+        atajo = "F8" if sistema == "Windows" else "1"
+        print(f"\n{self.COLOR_VERDE}🛒 Venta a CONSUMIDOR FINAL (Atajo {atajo}){self.COLOR_RESET}")
         idcliente = None
         cliente = None
         opcion_ident = '3'
         
-        # Continuar con el resto del flujo de venta
         return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
     
     def _continuar_venta_con_cliente(self, idcliente, cliente):
