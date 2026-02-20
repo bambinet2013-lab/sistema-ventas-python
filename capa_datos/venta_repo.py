@@ -17,29 +17,39 @@ class VentaRepositorio:
     
     def listar(self):
         """
-        Lista todas las ventas
-        
-        Returns:
-            list: Lista de ventas o lista vacía si hay error
+        Lista todas las ventas con fecha_hora formateada
         """
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT v.idventa, v.fecha, v.tipo_comprobante, 
-                   v.serie, v.numero_comprobante, v.igv, v.estado,
-                   c.nombre + ' ' + c.apellidos as cliente,
+            SELECT v.idventa, 
+                   CONVERT(varchar, v.fecha_hora, 103) + ' ' + CONVERT(varchar, v.fecha_hora, 108) as fecha,
+                   v.fecha_hora,
+                   v.tipo_comprobante, 
+                   v.serie, 
+                   v.numero_comprobante, 
+                   v.igv, 
+                   v.estado,
+                   ISNULL(c.nombre + ' ' + c.apellidos, 'CONSUMIDOR FINAL') as cliente,
                    t.nombre + ' ' + t.apellidos as trabajador
             FROM venta v
             LEFT JOIN cliente c ON v.idcliente = c.idcliente
             LEFT JOIN trabajador t ON v.idtrabajador = t.idtrabajador
-            ORDER BY v.fecha DESC
+            ORDER BY v.fecha_hora DESC
             """
             cursor.execute(query)
             
-            # Convertir a lista de diccionarios
+            # Obtener los nombres de las columnas
             columns = [column[0] for column in cursor.description]
+            
+            # Convertir las filas a diccionarios
             rows = cursor.fetchall()
-            result = [dict(zip(columns, row)) for row in rows]
+            result = []
+            for row in rows:
+                row_dict = {}
+                for i, col in enumerate(columns):
+                    row_dict[col] = row[i]
+                result.append(row_dict)
             
             logger.info(f"✅ {len(result)} ventas listadas")
             return result
@@ -86,53 +96,42 @@ class VentaRepositorio:
             return None
     
     def crear(self, idtrabajador, idcliente, tipo_comprobante, 
-              serie, numero_comprobante, igv, estado='REGISTRADO'):
+              serie, numero_comprobante, igv, estado='REGISTRADO',
+              moneda='VES', tasa_cambio=1.0, monto_bs=None, monto_divisa=None):
         """
-        Inserta una nueva venta (idcliente puede ser NULL)
-        
-        Args:
-            idtrabajador (int): ID del trabajador
-            idcliente (int or None): ID del cliente (puede ser None)
-            tipo_comprobante (str): FACTURA, BOLETA, TICKET
-            serie (str): Serie del comprobante
-            numero_comprobante (str): Número del comprobante
-            igv (float): Porcentaje de IGV
-            estado (str): Estado de la venta
-            
-        Returns:
-            int or None: ID de la venta creada o None si hay error
+        Inserta una nueva venta con soporte multimoneda
         """
         try:
             cursor = self.conn.cursor()
             
-            # Construir la consulta
             query = """
             INSERT INTO venta 
-            (idtrabajador, idcliente, fecha, tipo_comprobante, 
-             serie, numero_comprobante, igv, estado)
+            (idtrabajador, idcliente, fecha_hora, tipo_comprobante, 
+             serie, numero_comprobante, igv, estado,
+             moneda, tasa_cambio, monto_bs, monto_divisa)
             OUTPUT INSERTED.idventa
-            VALUES (?, ?, GETDATE(), ?, ?, ?, ?, ?)
+            VALUES (?, ?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             
-            # Ejecutar la consulta
             cursor.execute(query, (
                 idtrabajador, 
-                idcliente,  # Puede ser None
+                idcliente,
                 tipo_comprobante,
                 serie, 
                 numero_comprobante, 
                 igv, 
-                estado
+                estado,
+                moneda,
+                tasa_cambio,
+                monto_bs,
+                monto_divisa
             ))
             
-            # Obtener el ID insertado
             row = cursor.fetchone()
             idventa = row[0] if row else None
-            
-            # Confirmar la transacción
             self.conn.commit()
             
-            logger.info(f"✅ Venta creada con ID: {idventa}")
+            logger.info(f"✅ Venta #{idventa} creada - Moneda: {moneda} - Tasa: {tasa_cambio}")
             return idventa
             
         except Exception as e:

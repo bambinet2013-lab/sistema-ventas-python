@@ -4,6 +4,7 @@ Menú principal del sistema de ventas (Interfaz de consola)
 """
 import os
 import sys
+import readchar
 from datetime import datetime
 
 # Añadir el directorio padre al path para importar módulos
@@ -40,6 +41,7 @@ from capa_negocio.proveedor_archivo_service import ProveedorArchivoService
 
 # Importaciones para SENIAT y auditoría
 from capa_datos.auditoria_repo import AuditoriaRepositorio
+from capa_datos.tasa_repo import TasaRepositorio
 from capa_negocio.auditoria_service import AuditoriaService
 from config.seniat_config import SENIAT_CONFIG, TECLAS_ATAJO, MENSAJES_LEGALES
 
@@ -54,6 +56,17 @@ logger.add(sys.stderr, format="<level>{level: <8}</level> | <cyan>{name}</cyan>:
 
 class SistemaVentas:
     """Clase principal del sistema"""
+    
+    # Colores para la terminal
+    COLOR_ROJO = '\033[91m'
+    COLOR_VERDE = '\033[92m'
+    COLOR_AMARILLO = '\033[93m'
+    COLOR_AZUL = '\033[94m'
+    COLOR_MAGENTA = '\033[95m'
+    COLOR_CYAN = '\033[96m'
+    COLOR_NARANJA = '\033[38;5;208m'
+    COLOR_RESET = '\033[0m'
+    COLOR_NEGRITA = '\033[1m'
     
     def __init__(self):
         self.db = ConexionDB()
@@ -91,7 +104,8 @@ class SistemaVentas:
         rol_repo = RolRepositorio(self.conn)
         usuario_admin_repo = UsuarioAdminRepositorio(self.conn)
         proveedor_archivo_repo = ProveedorArchivoRepositorio(self.conn)
-        
+        tasa_repo = TasaRepositorio(self.conn)    
+    
         # Inicializar servicios base
         self.trabajador_service = TrabajadorService(trabajador_repo)
         self.categoria_service = CategoriaService(categoria_repo)
@@ -101,20 +115,18 @@ class SistemaVentas:
         self.proveedor_archivo_service = ProveedorArchivoService(proveedor_archivo_repo, self.proveedor_service)
         
         # IMPORTANTE: Orden correcto de inicialización
-        # 1. Primero inventario_service (depende de articulo_service)
         self.inventario_service = InventarioService(self.articulo_service)
         logger.info("✅ InventarioService inicializado")
         
-        # 2. Luego venta_service (depende de inventario_service)
         self.venta_service = VentaService(
             venta_repo, 
             self.cliente_service, 
             self.trabajador_service, 
-            self.inventario_service  # <--- AHORA SÍ ESTÁ CORRECTO
+            self.inventario_service,
+            tasa_repo=tasa_repo
         )
         logger.info("✅ VentaService inicializado")
         
-        # 3. Los demás servicios
         self.ingreso_service = IngresoService(
             ingreso_repo, 
             self.articulo_service, 
@@ -125,10 +137,8 @@ class SistemaVentas:
         self.usuario_admin_service = UsuarioAdminService(usuario_admin_repo, self.rol_service)
         self.token_service = TokenService(self.conn)
         
-        # Asignar rol_service a trabajador_service
         self.trabajador_service.rol_service = self.rol_service
         
-        # Inicializar servicio de email
         self.email_service = EmailService(
             smtp_server="smtp.gmail.com",
             smtp_port=587,
@@ -136,7 +146,6 @@ class SistemaVentas:
             password="fhnh tiax mfus fmok"
         )
         
-        # Inicializar servicio de auditoría
         auditoria_repo = AuditoriaRepositorio(self.conn)
         self.auditoria_service = AuditoriaService(auditoria_repo)
         logger.info("✅ Servicio de auditoría inicializado")
@@ -149,18 +158,49 @@ class SistemaVentas:
     
     def pausa(self):
         """Pausa la ejecución hasta que el usuario presione Enter"""
-        input("\n🔹 Presione Enter para continuar...")
+        input(f"\n{self.COLOR_AMARILLO}🔹 Presione Enter para continuar...{self.COLOR_RESET}")
     
+    def obtener_tasas_actuales(self):
+        """
+        Obtiene las tasas de cambio actuales del sistema
+        Returns:
+            dict: Diccionario con tasas de USD y EUR
+        """
+        tasas = {'USD': None, 'EUR': None}
+        
+        try:
+            # Intentar obtener tasas desde el servicio de ventas
+            if hasattr(self, 'venta_service') and self.venta_service and hasattr(self.venta_service, 'tasa_service'):
+                if self.venta_service.tasa_service:
+                    tasas['USD'] = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
+                    tasas['EUR'] = self.venta_service.tasa_service.obtener_tasa_del_dia('EUR')
+            else:
+                # Fallback: consulta directa a BD
+                if hasattr(self, 'conn') and self.conn:
+                    tasa_repo = TasaRepositorio(self.conn)
+                    tasas['USD'] = tasa_repo.obtener_ultima_tasa('USD')
+                    tasas['EUR'] = tasa_repo.obtener_ultima_tasa('EUR')
+        except Exception as e:
+            logger.error(f"Error obteniendo tasas para menú: {e}")
+        
+        return tasas
+
+    def obtener_fecha_hora_actual(self):
+        """
+        Retorna la fecha y hora actual formateada
+        Returns:
+            tuple: (dia_semana, fecha, hora)
+        """
+        ahora = datetime.now()
+        dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+        dia_semana = dias_semana[ahora.weekday()]
+        fecha = ahora.strftime("%d/%m/%Y")
+        hora = ahora.strftime("%I:%M:%S %p")
+        return dia_semana, fecha, hora
+
     def registrar_auditoria(self, accion, tabla, registro_id, datos_anteriores=None, datos_nuevos=None):
         """
         Registra una acción en el log de auditoría
-        
-        Args:
-            accion: Tipo de acción (CREAR, MODIFICAR, ELIMINAR, etc)
-            tabla: Tabla afectada
-            registro_id: ID del registro
-            datos_anteriores: Datos antes del cambio (opcional)
-            datos_nuevos: Datos después del cambio (opcional)
         """
         try:
             usuario_actual = self.trabajador_service.get_usuario_actual()
@@ -182,57 +222,136 @@ class SistemaVentas:
             logger.error(f"Error registrando auditoría: {e}")
     
     def mostrar_cabecera(self, titulo):
-        """Muestra una cabecera formateada"""
+        """Muestra una cabecera formateada con color"""
         self.limpiar_pantalla()
-        print("=" * 60)
-        print(f"{titulo:^60}")
-        print("=" * 60)
+        print(f"{self.COLOR_AZUL}{'=' * 60}{self.COLOR_RESET}")
+        print(f"{self.COLOR_NEGRITA}{titulo:^60}{self.COLOR_RESET}")
+        print(f"{self.COLOR_AZUL}{'=' * 60}{self.COLOR_RESET}")
         print()
     
     def mostrar_menu_principal(self):
-        """Muestra el menú principal con opciones según permisos"""
-        self.mostrar_cabecera("SISTEMA DE VENTAS - 3 CAPAS")
+        """Muestra el menú principal con fecha, hora, tasas de cambio y colores"""
+        self.limpiar_pantalla()
         
+        dia_semana, fecha, hora = self.obtener_fecha_hora_actual()
+        
+        # Obtener tasas de cambio
+        tasas = self.obtener_tasas_actuales()
+        
+        # Línea superior
+        print(f"{self.COLOR_AZUL}╔" + "═" * 78 + f"╗{self.COLOR_RESET}")
+        
+        # Título centrado
+        titulo = "SISTEMA DE VENTAS - 3 CAPAS"
+        espacios_izq = (78 - len(titulo)) // 2
+        espacios_der = 78 - len(titulo) - espacios_izq
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{' ' * espacios_izq}{self.COLOR_NEGRITA}{titulo}{self.COLOR_RESET}{' ' * espacios_der}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        # Línea separadora
+        print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
+        
+        # Fecha y hora
+        fecha_hora_str = f"   {self.COLOR_VERDE}📅 {dia_semana}, {fecha}{self.COLOR_RESET}  {self.COLOR_AMARILLO}⏰ {hora}{self.COLOR_RESET}  {self.COLOR_NARANJA}🇻🇪 Hora Local{self.COLOR_RESET}"
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{fecha_hora_str:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        # Línea separadora
+        print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
+        
+        # Tasas de cambio
+        linea_tasas = f"   {self.COLOR_AMARILLO}💱 TASAS DEL DÍA:{self.COLOR_RESET}"
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_tasas:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        if tasas['USD']:
+            linea_usd = f"      {self.COLOR_VERDE}💵 USD:{self.COLOR_RESET} 1 = {self.COLOR_AMARILLO}Bs. {tasas['USD']:.2f}{self.COLOR_RESET}"
+        else:
+            linea_usd = f"      {self.COLOR_VERDE}💵 USD:{self.COLOR_RESET} {self.COLOR_ROJO}No registrada{self.COLOR_RESET}"
+        
+        if tasas['EUR']:
+            linea_eur = f"      {self.COLOR_VERDE}💶 EUR:{self.COLOR_RESET} 1 = {self.COLOR_AMARILLO}Bs. {tasas['EUR']:.2f}{self.COLOR_RESET}"
+        else:
+            linea_eur = f"      {self.COLOR_VERDE}💶 EUR:{self.COLOR_RESET} {self.COLOR_ROJO}No registrada{self.COLOR_RESET}"
+        
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_usd:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_eur:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        # Línea separadora
+        print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
+        
+        # Información de usuario
         usuario = self.trabajador_service.get_usuario_actual()
         if usuario:
-            # Mostrar información del usuario y su rol
             rol_nombre = "Sin rol"
             if usuario.get('idrol'):
                 rol = self.rol_service.repositorio.obtener_rol(usuario['idrol'])
                 if rol:
                     rol_nombre = rol['nombre']
             
-            print(f"👤 Usuario: {usuario['nombre']} {usuario['apellidos']} [{rol_nombre}]")
-            print(f"🔑 Permisos: {len(self.rol_service.get_permisos_usuario())} activos")
-            print()
+            usuario_str = f"   👤 Usuario: {self.COLOR_VERDE}{usuario['nombre']} {usuario['apellidos']} [{rol_nombre}]{self.COLOR_RESET}"
+            permisos_str = f"   🔑 Permisos: {self.COLOR_AMARILLO}{len(self.rol_service.get_permisos_usuario())} activos{self.COLOR_RESET}"
+            
+            print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{usuario_str:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+            print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{permisos_str:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        else:
+            usuario_str = f"   👤 Usuario: {self.COLOR_AMARILLO}No autenticado{self.COLOR_RESET}"
+            print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{usuario_str:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
         
-        # Opciones visibles según permisos
+        # Línea separadora
+        print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
+        
+        # Título del menú
+        menu_titulo = "MENÚ PRINCIPAL"
+        espacios_izq_menu = (78 - len(menu_titulo)) // 2
+        espacios_der_menu = 78 - len(menu_titulo) - espacios_izq_menu
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{' ' * espacios_izq_menu}{self.COLOR_NEGRITA}{menu_titulo}{self.COLOR_RESET}{' ' * espacios_der_menu}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        # Línea separadora
+        print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
+        
+        # Opciones del menú
         opciones = []
         
         if not usuario or self.rol_service.tiene_permiso('clientes_ver'):
-            opciones.append(("1", "Gestión de Clientes"))
+            opciones.append(("1", "Gestión de Clientes", "👥"))
         if not usuario or self.rol_service.tiene_permiso('articulos_ver'):
-            opciones.append(("2", "Gestión de Artículos"))
+            opciones.append(("2", "Gestión de Artículos", "📦"))
         if not usuario or self.rol_service.tiene_permiso('proveedores_ver'):
-            opciones.append(("3", "Gestión de Proveedores"))
+            opciones.append(("3", "Gestión de Proveedores", "🏢"))
         if not usuario or self.rol_service.tiene_permiso('ventas_ver'):
-            opciones.append(("4", "Gestión de Ventas"))
+            opciones.append(("4", "Gestión de Ventas", "💰"))
         if not usuario or self.rol_service.tiene_permiso('inventario_ver'):
-            opciones.append(("5", "Gestión de Inventario"))
+            opciones.append(("5", "Gestión de Inventario", "📊"))
         if not usuario or self.rol_service.tiene_permiso('reportes_ventas'):
-            opciones.append(("6", "Reportes"))
+            opciones.append(("6", "Reportes", "📈"))
         if usuario and self.rol_service.tiene_permiso('usuarios_ver'):
-            opciones.append(("7", "Administración de Usuarios"))
+            opciones.append(("7", "Administración de Usuarios", "👤"))
         
-        for num, desc in opciones:
-            print(f"{num}. {desc}")
+        for num, desc, icono in opciones:
+            linea_opcion = f"   {icono} {num}. {desc}"
+            espacios = 78 - len(linea_opcion)
+            print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_opcion}{' ' * espacios}{self.COLOR_AZUL}║{self.COLOR_RESET}")
         
-        print("8. Cerrar Sesión" if usuario else "8. Iniciar Sesión")
-        print("0. Salir")
+        # Línea separadora
+        print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
+        
+        # Opción de sesión
+        if usuario:
+            linea_sesion = f"   🔑 8. Cerrar Sesión"
+        else:
+            linea_sesion = f"   🔑 8. Iniciar Sesión"
+        espacios_sesion = 78 - len(linea_sesion)
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_sesion}{' ' * espacios_sesion}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        # Opción de salir
+        linea_salir = f"   ❌ 0. Salir"
+        espacios_salir = 78 - len(linea_salir)
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_salir}{' ' * espacios_salir}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
+        # Línea inferior
+        print(f"{self.COLOR_AZUL}╚" + "═" * 78 + f"╝{self.COLOR_RESET}")
         print()
         
-        return input("🔹 Seleccione una opción: ").strip()
-    
+        return input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
+
     def menu_login(self):
         """Menú de inicio de sesión con opción de recuperación"""
         while True:
@@ -243,7 +362,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._login_normal()
@@ -266,7 +385,7 @@ class SistemaVentas:
         password = input("Contraseña: ")
         
         if self.trabajador_service.login_por_email(email, password):
-            print("✅ Sesión iniciada correctamente")
+            print(f"{self.COLOR_VERDE}✅ Sesión iniciada correctamente{self.COLOR_RESET}")
             self.registrar_auditoria(
                 accion="LOGIN",
                 tabla="trabajador",
@@ -274,7 +393,7 @@ class SistemaVentas:
                 datos_nuevos=f"Login exitoso - Email: {email}"
             )
         else:
-            print("❌ Email o contraseña incorrectos")
+            print(f"{self.COLOR_ROJO}❌ Email o contraseña incorrectos{self.COLOR_RESET}")
         
         self.pausa()
     
@@ -288,7 +407,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._solicitar_enlace_magico()
@@ -306,7 +425,6 @@ class SistemaVentas:
         
         email = input("Ingrese su email registrado: ")
         
-        # Buscar usuario por email
         usuario = self.trabajador_service.buscar_por_email(email)
         
         if not usuario:
@@ -318,11 +436,9 @@ class SistemaVentas:
         print(f"📧 Email: {usuario['email']}")
         print()
         
-        # Generar token
         token = self.token_service.crear_token(usuario['idtrabajador'])
         
         if token:
-            # Enviar por correo
             if self.email_service.enviar_enlace_magico(
                 email, token, usuario['nombre']
             ):
@@ -354,20 +470,17 @@ class SistemaVentas:
         
         token = input("Ingrese el token recibido: ").strip()
         
-        # Verificar token
         idtrabajador = self.token_service.verificar_token(token)
         
         if idtrabajador:
             usuario = self.trabajador_service.obtener_por_id(idtrabajador)
             print(f"\n✅ Token válido para: {usuario['nombre']} {usuario['apellidos']}")
             
-            # Solicitar nueva contraseña
             print("\n" + "="*50)
             print("🔑 CAMBIO DE CONTRASEÑA")
             print("="*50)
             print()
             
-            # Desactivar logger temporalmente
             logger.remove()
             logger.add(lambda msg: None)
             
@@ -375,13 +488,11 @@ class SistemaVentas:
                 nueva_pass = input("➤ Ingrese NUEVA contraseña (mínimo 6 caracteres): ")
                 confirmar = input("➤ Confirme la NUEVA contraseña: ")
             finally:
-                # Restaurar logger
                 logger.remove()
                 logger.add(sys.stderr, format="<level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
             
             if nueva_pass == confirmar and len(nueva_pass) >= 6:
                 if self.trabajador_service.actualizar_password(usuario['email'], nueva_pass):
-                    # Marcar token como usado
                     self.token_service.marcar_token_usado(token)
                     print("\n✅ Contraseña actualizada correctamente")
                     print("🔐 Ya puede iniciar sesión con su nueva contraseña")
@@ -414,7 +525,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._listar_usuarios()
@@ -445,18 +556,13 @@ class SistemaVentas:
             print("-" * 90)
             for u in usuarios:
                 rol = u.get('rol_nombre') or f"Rol {u['idrol']}"
-                
-                # Manejar valores None
-                email_val = u.get('email', '')
-                if email_val is None:
-                    email_val = ''
-                
+                email_val = u.get('email', '') or ''
                 print(f"{u['idtrabajador']:<5} {u['usuario']:<15} {u['nombre'] + ' ' + u['apellidos']:<25} {email_val:<30} {rol:<15}")
         
         self.pausa()
     
     def _crear_usuario(self):
-        """Crea un nuevo usuario del sistema (trabajador) con validación venezolana"""
+        """Crea un nuevo usuario del sistema"""
         self.mostrar_cabecera("CREAR NUEVO USUARIO")
         
         print("📝 Complete los datos del nuevo usuario:")
@@ -466,19 +572,16 @@ class SistemaVentas:
         apellidos = input("Apellidos: ")
         sexo = input("Sexo (M/F/O): ").upper()
         
-        # Fecha de nacimiento (OPCIONAL)
         print("\n📅 Fecha de nacimiento (OPCIONAL - presione Enter para omitir)")
         print("   Formato: DD/MM/YYYY (ej: 15/05/1990)")
         
         while True:
             fecha_nac_str = input("Fecha de nacimiento: ").strip()
             
-            # Si está vacío, salir del bucle (opcional)
             if fecha_nac_str == "":
                 fecha_nac = None
                 break
             
-            # Validar fecha
             valida, fecha_obj, mensaje = ValidacionVenezuela.validar_fecha(fecha_nac_str)
             
             if valida:
@@ -488,18 +591,12 @@ class SistemaVentas:
                 print(mensaje)
                 print("   Intente nuevamente o presione Enter para omitir:")
         
-        # Selección de tipo de documento para el usuario
         print("\n" + "="*60)
         print("🔍 TIPO DE DOCUMENTO DEL USUARIO")
         print("="*60)
         print("1. 🇻🇪 Venezolano (V) → V12345678")
-        print("   (Letra V + 8 dígitos de cédula)")
-        print("-"*60)
         print("2. 🌎 Extranjero (E) → E87654321")
-        print("   (Letra E + 8 dígitos de cédula)")
-        print("-"*60)
         print("3. 🛂 Pasaporte → número de pasaporte")
-        print("   (6-12 caracteres, sin letra especial)")
         print("="*60)
         
         tipo_persona = input("Seleccione tipo de documento (1-3): ").strip()
@@ -515,7 +612,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'V'")
                 self.pausa()
                 return
-            documento_completo = num_doc  # Guardamos completo (V12345678)
+            documento_completo = num_doc
             
         elif tipo_persona == '2':
             tipo_doc = 'E'
@@ -528,7 +625,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'E'")
                 self.pausa()
                 return
-            documento_completo = num_doc  # Guardamos completo (E87654321)
+            documento_completo = num_doc
             
         elif tipo_persona == '3':
             tipo_doc = 'PASAPORTE'
@@ -548,7 +645,6 @@ class SistemaVentas:
         telefono = input("Teléfono (opcional): ") or None
         direccion = input("Dirección (opcional): ") or None
         
-        # Mostrar roles disponibles
         print("\nRoles disponibles:")
         roles = self.rol_service.listar_roles()
         for r in roles:
@@ -561,7 +657,6 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Convertir fecha a formato para BD si existe
         fecha_nac_bd = ValidacionVenezuela.formatear_fecha_para_bd(fecha_nac) if fecha_nac else None
         
         if self.usuario_admin_service.crear_usuario(
@@ -572,7 +667,6 @@ class SistemaVentas:
             if not fecha_nac:
                 print("   ℹ️ Fecha de nacimiento no registrada")
             
-            # Registrar en auditoría
             self.registrar_auditoria(
                 accion="CREAR",
                 tabla="trabajador",
@@ -604,10 +698,9 @@ class SistemaVentas:
                 print(f"📌 Dirección: {usuario.get('direccion', 'No registrada')}")
                 print(f"📌 Rol: {usuario.get('rol_nombre')} (ID: {usuario['idrol']})")
                 
-                # Mostrar log de auditoría de este usuario
                 print("\n📋 ÚLTIMAS ACCIONES DE AUDITORÍA:")
                 logs = self.auditoria_service.consultar_por_tabla("trabajador", iduser)
-                for log in logs[:5]:  # Mostrar últimos 5
+                for log in logs[:5]:
                     print(f"   - {log['fecha_hora']}: {log['accion']}")
             else:
                 print(f"❌ No existe usuario con ID {iduser}")
@@ -629,7 +722,6 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            # Guardar datos anteriores para auditoría
             datos_anteriores = f"Usuario: {usuario['usuario']}, Email: {usuario['email']}, Rol: {usuario['idrol']}"
             
             print(f"\nEditando a: {usuario['nombre']} {usuario['apellidos']}")
@@ -640,7 +732,6 @@ class SistemaVentas:
             apellidos = input(f"Apellidos [{usuario['apellidos']}]: ") or usuario['apellidos']
             sexo = input(f"Sexo [{usuario['sexo']}]: ").upper() or usuario['sexo']
             
-            # Editar fecha de nacimiento
             fecha_actual = usuario['fecha_nacimiento']
             fecha_actual_str = fecha_actual.strftime('%d/%m/%Y') if fecha_actual else "No registrada"
             
@@ -680,7 +771,6 @@ class SistemaVentas:
             telefono = input(f"Teléfono [{usuario.get('telefono', '')}]: ") or usuario.get('telefono')
             direccion = input(f"Dirección [{usuario.get('direccion', '')}]: ") or usuario.get('direccion')
             
-            # Cambiar contraseña?
             cambiar_pass = input("¿Cambiar contraseña? (s/N): ").lower()
             nueva_pass = None
             if cambiar_pass == 's':
@@ -691,7 +781,6 @@ class SistemaVentas:
                     self.pausa()
                     return
             
-            # Mostrar roles disponibles
             print("\nRoles disponibles:")
             roles = self.rol_service.listar_roles()
             for r in roles:
@@ -702,7 +791,6 @@ class SistemaVentas:
             except:
                 idrol = usuario['idrol']
             
-            # Convertir fecha a formato BD
             fecha_nac_bd = ValidacionVenezuela.formatear_fecha_para_bd(fecha_nac) if fecha_nac else None
             
             if self.usuario_admin_service.actualizar_usuario(
@@ -711,7 +799,6 @@ class SistemaVentas:
             ):
                 print("✅ Usuario actualizado correctamente")
                 
-                # Registrar en auditoría
                 datos_nuevos = f"Usuario: {username}, Email: {email}, Rol: {idrol}"
                 self.registrar_auditoria(
                     accion="MODIFICAR",
@@ -735,7 +822,6 @@ class SistemaVentas:
         try:
             iduser = int(input("ID del usuario a eliminar: "))
             
-            # No permitir eliminarse a sí mismo
             usuario_actual = self.trabajador_service.get_usuario_actual()
             if usuario_actual and usuario_actual['idtrabajador'] == iduser:
                 print("❌ No puede eliminarse a sí mismo")
@@ -748,7 +834,6 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            # Guardar datos para auditoría
             datos_usuario = f"Usuario: {usuario['usuario']}, Email: {usuario['email']}"
             
             print(f"\n¿Está seguro de eliminar a {usuario['nombre']} {usuario['apellidos']}?")
@@ -758,7 +843,6 @@ class SistemaVentas:
                 if self.usuario_admin_service.eliminar_usuario(iduser):
                     print("✅ Usuario eliminado correctamente")
                     
-                    # Registrar en auditoría
                     self.registrar_auditoria(
                         accion="ELIMINAR",
                         tabla="trabajador",
@@ -787,7 +871,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self.listar_categorias()
@@ -851,7 +935,6 @@ class SistemaVentas:
         if self.categoria_service.crear(nombre, descripcion):
             print("✅ Categoría creada exitosamente")
             
-            # Obtener la categoría recién creada
             categorias = self.categoria_service.listar()
             if categorias:
                 idcategoria = categorias[0]['idcategoria']
@@ -879,7 +962,6 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            # Guardar datos anteriores
             datos_anteriores = f"Categoría: {categoria['nombre']}"
             
             print(f"\n📌 Datos actuales:")
@@ -954,7 +1036,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._listar_clientes()
@@ -987,16 +1069,8 @@ class SistemaVentas:
             for c in clientes:
                 nombre_completo = f"{c['nombre']} {c['apellidos']}"
                 documento = f"{c['tipo_documento']}-{c['num_documento']}"
-                
-                # Manejar valores None
-                telefono_val = c.get('telefono', '')
-                if telefono_val is None:
-                    telefono_val = ''
-                    
-                email_val = c.get('email', '')
-                if email_val is None:
-                    email_val = ''
-                
+                telefono_val = c.get('telefono', '') or ''
+                email_val = c.get('email', '') or ''
                 print(f"{c['idcliente']:<5} {nombre_completo:<25} {documento:<20} {telefono_val:<12} {email_val:<25}")
         
         self.pausa()
@@ -1013,19 +1087,16 @@ class SistemaVentas:
         apellidos = input("* Apellidos: ")
         sexo = input("* Sexo (M/F/O): ").upper()
         
-        # Fecha de nacimiento (OPCIONAL)
         print("\n📅 Fecha de nacimiento (OPCIONAL - presione Enter para omitir)")
         print("   Formato: DD/MM/YYYY (ej: 15/05/1990)")
         
         while True:
             fecha_nac_str = input("Fecha de nacimiento: ").strip()
             
-            # Si está vacío, salir del bucle (opcional)
             if fecha_nac_str == "":
                 fecha_nac = None
                 break
             
-            # Validar fecha
             valida, fecha_obj, mensaje = ValidacionVenezuela.validar_fecha(fecha_nac_str)
             
             if valida:
@@ -1035,27 +1106,15 @@ class SistemaVentas:
                 print(mensaje)
                 print("   Intente nuevamente o presione Enter para omitir:")
         
-        # Selección de tipo de persona
         print("\n" + "="*60)
         print("🔍 TIPO DE PERSONA - FORMATO DEL DOCUMENTO")
         print("="*60)
         print("1. 🇻🇪 Persona Natural Venezolana  →  V12345678")
-        print("   (Letra V + 8 dígitos de cédula)")
-        print("-"*60)
         print("2. 🌎 Persona Natural Extranjera   →  E87654321")
-        print("   (Letra E + 8 dígitos de cédula)")
-        print("-"*60)
         print("3. 🏢 Persona Jurídica (Empresa)   →  J12345678")
-        print("   (Letra J + 8 dígitos de RIF)")
-        print("-"*60)
         print("4. 🏛️ Gobierno / Institución        →  G12345678")
-        print("   (Letra G + 8 dígitos de RIF)")
-        print("-"*60)
         print("5. 👥 Consejo Comunal               →  C12345678")
-        print("   (Letra C + 8 dígitos de RIF)")
-        print("-"*60)
         print("6. 🛂 Pasaporte                      →  Número de pasaporte")
-        print("   (6-12 caracteres, sin letra especial)")
         print("="*60)
         
         tipo_persona = input("Seleccione tipo de persona (1-6): ").strip()
@@ -1071,7 +1130,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'V'")
                 self.pausa()
                 return
-            num_doc = num_doc_completo[1:]  # Quitar la V para guardar solo números
+            num_doc = num_doc_completo[1:]
             
         elif tipo_persona == '2':
             tipo_doc = 'E'
@@ -1084,7 +1143,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'E'")
                 self.pausa()
                 return
-            num_doc = num_doc_completo[1:]  # Quitar la E
+            num_doc = num_doc_completo[1:]
             
         elif tipo_persona == '3':
             tipo_doc = 'J'
@@ -1097,7 +1156,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'J'")
                 self.pausa()
                 return
-            num_doc = num_doc_completo[1:]  # Quitar la J
+            num_doc = num_doc_completo[1:]
             
         elif tipo_persona == '4':
             tipo_doc = 'G'
@@ -1110,7 +1169,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'G'")
                 self.pausa()
                 return
-            num_doc = num_doc_completo[1:]  # Quitar la G
+            num_doc = num_doc_completo[1:]
             
         elif tipo_persona == '5':
             tipo_doc = 'C'
@@ -1123,7 +1182,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'C'")
                 self.pausa()
                 return
-            num_doc = num_doc_completo[1:]  # Quitar la C
+            num_doc = num_doc_completo[1:]
             
         elif tipo_persona == '6':
             tipo_doc = 'PASAPORTE'
@@ -1137,11 +1196,10 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Email (opcional para clientes)
         print("\n📧 Email (opcional para clientes):")
         email = input("Email: ").strip()
         if email and ('@' not in email or '.' not in email):
-            print("❌ El email no tiene un formato válido (debe contener @ y .)")
+            print("❌ El email no tiene un formato válido")
             self.pausa()
             return
         if not email:
@@ -1150,7 +1208,6 @@ class SistemaVentas:
         direccion = input("Dirección (opcional): ") or None
         telefono = input("Teléfono (opcional): ") or None
         
-        # Convertir fecha a formato para BD si existe
         fecha_nac_bd = ValidacionVenezuela.formatear_fecha_para_bd(fecha_nac) if fecha_nac else None
         
         if self.cliente_service.crear(
@@ -1161,7 +1218,6 @@ class SistemaVentas:
             if not fecha_nac:
                 print("   ℹ️ Fecha de nacimiento no registrada")
             
-            # Buscar el ID del cliente recién creado
             cliente_nuevo = self.cliente_service.buscar_por_documento(tipo_doc + num_doc)
             if cliente_nuevo:
                 idcliente = cliente_nuevo['idcliente']
@@ -1183,7 +1239,7 @@ class SistemaVentas:
         
         print("1. Buscar por ID")
         print("2. Buscar por documento")
-        opcion = input("🔹 Seleccione: ").strip()
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
         
         if opcion == '1':
             try:
@@ -1198,11 +1254,9 @@ class SistemaVentas:
         
         elif opcion == '2':
             doc = input("Número de documento (ej: V12345678): ").upper()
-            # Extraer tipo y número
             if doc and doc[0] in ['V', 'E', 'J', 'G', 'C']:
                 tipo = doc[0]
                 numero = doc[1:]
-                # Buscar por tipo y número
                 clientes = self.cliente_service.listar()
                 encontrado = None
                 for c in clientes:
@@ -1212,7 +1266,6 @@ class SistemaVentas:
                 if encontrado:
                     self._mostrar_detalle_cliente(encontrado)
                     
-                    # Registrar búsqueda en auditoría
                     self.registrar_auditoria(
                         accion="CONSULTAR",
                         tabla="cliente",
@@ -1245,7 +1298,7 @@ class SistemaVentas:
         print("¿Cómo desea buscar el cliente?")
         print("1. Buscar por ID")
         print("2. Buscar por documento")
-        opcion = input("🔹 Seleccione: ").strip()
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
         
         cliente = None
         
@@ -1264,20 +1317,12 @@ class SistemaVentas:
                 
         elif opcion == '2':
             doc = input("Número de documento (ej: V12345678): ").upper()
-            # Limpiar el documento: quitar guiones y espacios
             doc_limpio = doc.replace('-', '').replace(' ', '')
             
-            # Buscar por documento (probando diferentes formatos)
             cliente_simple = None
-            
-            # Intentar 1: búsqueda exacta con el formato ingresado
             cliente_simple = self.cliente_service.buscar_por_documento(doc)
-            
-            # Intentar 2: búsqueda sin guiones
             if not cliente_simple:
                 cliente_simple = self.cliente_service.buscar_por_documento(doc_limpio)
-            
-            # Intentar 3: búsqueda con guión después de la letra
             if not cliente_simple and len(doc_limpio) >= 9:
                 doc_con_guion = doc_limpio[0] + '-' + doc_limpio[1:]
                 cliente_simple = self.cliente_service.buscar_por_documento(doc_con_guion)
@@ -1286,7 +1331,6 @@ class SistemaVentas:
                 print(f"❌ No existe cliente con documento {doc}")
                 self.pausa()
                 return
-            # Obtener datos completos
             cliente = self.cliente_service.obtener_por_id(cliente_simple['idcliente'])
             
         else:
@@ -1294,36 +1338,27 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Mostrar tipo actual con emoji
         tipo_actual = cliente['tipo_documento']
-        if tipo_actual == 'V':
-            tipo_texto = "🇻🇪 Persona Natural Venezolana"
-        elif tipo_actual == 'E':
-            tipo_texto = "🌎 Persona Natural Extranjera"
-        elif tipo_actual == 'J':
-            tipo_texto = "🏢 Empresa"
-        elif tipo_actual == 'G':
-            tipo_texto = "🏛️ Gobierno / Institución"
-        elif tipo_actual == 'C':
-            tipo_texto = "👥 Consejo Comunal"
-        elif tipo_actual == 'PASAPORTE':
-            tipo_texto = "🛂 Pasaporte"
-        else:
-            tipo_texto = tipo_actual
+        tipo_texto = {
+            'V': "🇻🇪 Persona Natural Venezolana",
+            'E': "🌎 Persona Natural Extranjera",
+            'J': "🏢 Empresa",
+            'G': "🏛️ Gobierno / Institución",
+            'C': "👥 Consejo Comunal",
+            'PASAPORTE': "🛂 Pasaporte"
+        }.get(tipo_actual, tipo_actual)
         
         print(f"\nEditando a: {cliente['nombre']} {cliente['apellidos']}")
         print(f"📌 Tipo actual: {tipo_texto}")
         print("(Deje en blanco para mantener el valor actual)")
         print()
         
-        # Guardar datos anteriores para auditoría
         datos_anteriores = f"Cliente: {cliente['nombre']} {cliente['apellidos']}, Doc: {cliente['tipo_documento']}-{cliente['num_documento']}"
         
         nombre = input(f"Nombre [{cliente['nombre']}]: ") or cliente['nombre']
         apellidos = input(f"Apellidos [{cliente['apellidos']}]: ") or cliente['apellidos']
         sexo = input(f"Sexo [{cliente['sexo']}]: ").upper() or cliente['sexo']
         
-        # Editar fecha de nacimiento (opcional)
         fecha_actual = cliente['fecha_nacimiento']
         fecha_actual_str = fecha_actual.strftime('%d/%m/%Y') if fecha_actual else "No registrada"
         
@@ -1334,7 +1369,6 @@ class SistemaVentas:
             opcion_fecha = input("Opción: ").strip().upper()
             
             if opcion_fecha == "":
-                # Mantener fecha actual
                 fecha_nac = fecha_actual
                 break
             elif opcion_fecha == "BORRAR":
@@ -1355,7 +1389,6 @@ class SistemaVentas:
                     break
                 else:
                     print(mensaje)
-                    # Continuar el bucle
             else:
                 print("Opción no válida. Use Enter, NUEVA o BORRAR")
         
@@ -1363,7 +1396,6 @@ class SistemaVentas:
         cambiar_tipo = input().lower()
         
         if cambiar_tipo == 's':
-            # Similar a la creación
             print("\n" + "="*60)
             print("🔍 NUEVO TIPO DE DOCUMENTO")
             print("="*60)
@@ -1442,7 +1474,6 @@ class SistemaVentas:
         telefono = input(f"Teléfono [{cliente.get('telefono', '')}]: ") or cliente.get('telefono')
         email = input(f"Email [{cliente.get('email', '')}]: ") or cliente.get('email')
         
-        # Convertir fecha a formato BD
         fecha_nac_bd = ValidacionVenezuela.formatear_fecha_para_bd(fecha_nac) if fecha_nac else None
         
         if self.cliente_service.actualizar(
@@ -1451,7 +1482,6 @@ class SistemaVentas:
         ):
             print("\n✅ Cliente actualizado correctamente")
             
-            # Registrar en auditoría
             datos_nuevos = f"Cliente: {nombre} {apellidos}, Doc: {tipo_doc}-{num_doc}"
             self.registrar_auditoria(
                 accion="MODIFICAR",
@@ -1479,7 +1509,6 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            # Guardar datos para auditoría
             datos_cliente = f"Cliente: {cliente['nombre']} {cliente['apellidos']}, Doc: {cliente['tipo_documento']}-{cliente['num_documento']}"
             
             print(f"\n¿Está seguro de eliminar a {cliente['nombre']} {cliente['apellidos']}?")
@@ -1519,7 +1548,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._listar_articulos()
@@ -1564,7 +1593,6 @@ class SistemaVentas:
         """Crea un nuevo artículo"""
         self.mostrar_cabecera("CREAR ARTÍCULO")
         
-        # Mostrar categorías disponibles
         categorias = self.categoria_service.listar()
         if not categorias:
             print("❌ No hay categorías. Cree una primero.")
@@ -1582,7 +1610,6 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Mostrar presentaciones
         print("\nPresentaciones:")
         print("  1. Unidad")
         print("  2. Caja")
@@ -1603,7 +1630,6 @@ class SistemaVentas:
         if self.articulo_service.crear(codigo, nombre, idcat, idpres, descripcion):
             print("✅ Artículo creado exitosamente")
             
-            # Buscar el ID del artículo recién creado
             articulo_nuevo = self.articulo_service.buscar_por_codigo(codigo)
             if articulo_nuevo:
                 idarticulo = articulo_nuevo['idarticulo']
@@ -1625,7 +1651,7 @@ class SistemaVentas:
         
         print("1. Buscar por ID")
         print("2. Buscar por código")
-        opcion = input("🔹 Seleccione: ").strip()
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
         
         if opcion == '1':
             try:
@@ -1649,7 +1675,6 @@ class SistemaVentas:
             codigo = input("Código del artículo: ")
             art = self.articulo_service.buscar_por_codigo(codigo)
             if art:
-                # Obtener datos completos
                 art = self.articulo_service.obtener_por_id(art['idarticulo'])
                 self._mostrar_detalle_articulo(art)
                 
@@ -1687,7 +1712,6 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            # Guardar datos anteriores para auditoría
             datos_anteriores = f"Artículo: {art['nombre']}, Código: {art['codigo']}"
             
             print(f"\nEditando: {art['nombre']}")
@@ -1698,9 +1722,8 @@ class SistemaVentas:
             nombre = input(f"Nombre [{art['nombre']}]: ") or art['nombre']
             descripcion = input(f"Descripción [{art.get('descripcion', '')}]: ") or art.get('descripcion')
             
-            # Mostrar categorías
-            categorias = self.categoria_service.listar()
             print("\nCategorías disponibles:")
+            categorias = self.categoria_service.listar()
             for c in categorias:
                 print(f"  {c['idcategoria']}. {c['nombre']}")
             
@@ -1709,7 +1732,6 @@ class SistemaVentas:
             except:
                 idcat = art['idcategoria']
             
-            # Presentaciones
             print("\nPresentaciones:")
             print("  1. Unidad")
             print("  2. Caja")
@@ -1753,7 +1775,6 @@ class SistemaVentas:
                 self.pausa()
                 return
             
-            # Guardar datos para auditoría
             datos_articulo = f"Artículo: {art['nombre']}, Código: {art['codigo']}"
             
             print(f"\n¿Está seguro de eliminar {art['nombre']}?")
@@ -1818,7 +1839,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._listar_ventas()
@@ -1836,36 +1857,138 @@ class SistemaVentas:
     
     @requiere_permiso('ventas_crear')
     def _registrar_venta(self):
-        """Registra una nueva venta con 3 opciones de identificación"""
-        self.mostrar_cabecera("REGISTRAR VENTA")
+        """Registra una nueva venta con multimoneda y atajos de teclado"""
+        self.mostrar_cabecera("REGISTRAR VENTA - MULTIMONEDA")
         
-        print("📋 IDENTIFICACIÓN DEL CLIENTE")
-        print("="*60)
-        print("Seleccione el tipo de identificación:")
-        print("1. 🇻🇪 RIF (Empresas/Contribuyentes)")
-        print("2. 🆔 Cédula de Identidad (V/E)")
-        print("3. 🛒 CONSUMIDOR FINAL (Sin identificación)")
-        print("="*60)
+        # Obtener usuario actual
+        usuario = self.trabajador_service.get_usuario_actual()
+        if not usuario:
+            print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión para registrar ventas{self.COLOR_RESET}")
+            self.pausa()
+            return
         
-        opcion_ident = input("🔹 Seleccione (1-3): ").strip()
+        # ===== ATAJOS DE TECLADO =====
+        print(f"\n{self.COLOR_AMARILLO}⚡ ATAJOS DE TECLADO:{self.COLOR_RESET}")
+        print(f"  {self.COLOR_VERDE}[F8]{self.COLOR_RESET}  → Consumidor Final (DIRECTO)")
+        print(f"  {self.COLOR_VERDE}[F9]{self.COLOR_RESET}  → Buscar por Cédula")
+        print(f"  {self.COLOR_VERDE}[F10]{self.COLOR_RESET} → Buscar por RIF")
+        print(f"  {self.COLOR_VERDE}[ESC]{self.COLOR_RESET} → Menú normal")
+        print("\nPresione una tecla o use los atajos...")
+        
+        try:
+            import readchar
+            import sys
+            import termios
+            import tty
+            
+            # Configurar terminal para capturar teclas especiales
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                # Leer el primer carácter
+                ch = sys.stdin.read(1)
+                
+                # Si es ESC (tecla de escape)
+                if ch == '\x1b':
+                    # Leer los siguientes caracteres para teclas de función
+                    ch2 = sys.stdin.read(1)
+                    if ch2 == '[':
+                        ch3 = sys.stdin.read(1)
+                        # F8 = [15~, F9 = [20~, F10 = [21~
+                        if ch3 == '1':
+                            ch4 = sys.stdin.read(1)
+                            if ch4 == '5':
+                                ch5 = sys.stdin.read(1)
+                                if ch5 == '~':
+                                    key = 'F8'
+                                else:
+                                    key = 'ESC'
+                            else:
+                                key = 'ESC'
+                        elif ch3 == '2':
+                            ch4 = sys.stdin.read(1)
+                            if ch4 == '0':
+                                ch5 = sys.stdin.read(1)
+                                if ch5 == '~':
+                                    key = 'F9'
+                                else:
+                                    key = 'ESC'
+                            else:
+                                key = 'ESC'
+                        elif ch3 == '2':
+                            ch4 = sys.stdin.read(1)
+                            if ch4 == '1':
+                                ch5 = sys.stdin.read(1)
+                                if ch5 == '~':
+                                    key = 'F10'
+                                else:
+                                    key = 'ESC'
+                            else:
+                                key = 'ESC'
+                        else:
+                            key = 'ESC'
+                    else:
+                        key = 'ESC'
+                else:
+                    key = ch
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            
+            print(f"Tecla detectada: {key}")
+            
+            # F8 - Consumidor Final
+            if key == 'F8':
+                print(f"\n{self.COLOR_VERDE}✅ Atajo F8: Consumidor Final{self.COLOR_RESET}")
+                return self._continuar_venta_consumidor_final(usuario)
+            
+            # F9 - Buscar por Cédula
+            elif key == 'F9':
+                print(f"\n{self.COLOR_VERDE}✅ Atajo F9: Búsqueda por Cédula{self.COLOR_RESET}")
+                return self._buscar_por_cedula_rapido(usuario)
+            
+            # F10 - Buscar por RIF
+            elif key == 'F10':
+                print(f"\n{self.COLOR_VERDE}✅ Atajo F10: Búsqueda por RIF{self.COLOR_RESET}")
+                return self._buscar_por_rif_rapido(usuario)
+            
+            # ESC - Menú normal
+            elif key == 'ESC':
+                print(f"\n{self.COLOR_AMARILLO}⏎ ESC detectado - Continuando con menú normal{self.COLOR_RESET}")
+                opcion_ident = None
+            
+            else:
+                print(f"\n{self.COLOR_AMARILLO}⏎ Tecla '{key}' no es atajo - Continuando con menú normal{self.COLOR_RESET}")
+                opcion_ident = None
+                
+        except Exception as e:
+            logger.error(f"Error en atajo de teclado: {e}")
+            opcion_ident = None
+        
+        # Si no se usó atajo, mostrar menú normal
+        if opcion_ident is None:
+            print("\n📋 IDENTIFICACIÓN DEL CLIENTE")
+            print("="*60)
+            print("Seleccione el tipo de identificación:")
+            print("1. 🇻🇪 RIF (Empresas/Contribuyentes)")
+            print("2. 🆔 Cédula de Identidad (V/E)")
+            print("3. 🛒 CONSUMIDOR FINAL (Sin identificación)")
+            print("="*60)
+            opcion_ident = input(f"{self.COLOR_AMARILLO}🔹 Seleccione (1-3): {self.COLOR_RESET}").strip()
         
         idcliente = None
         cliente = None
-        tipo_documento = None
-        num_documento = None
         
-        # Opción 1: RIF
         if opcion_ident == '1':
             print("\n📄 FACTURA CON RIF")
             print("="*40)
             print("Buscar cliente por RIF:")
             print("1. Buscar existente")
             print("2. Crear nuevo")
-            subop = input("🔹 Seleccione: ").strip()
+            subop = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
             
             if subop == '1':
                 rif = input("Ingrese RIF (ej: J123456789): ").upper()
-                # Buscar por RIF (tipo_documento + num_documento)
                 cliente_simple = self.cliente_service.buscar_por_documento(rif)
                 if cliente_simple:
                     idcliente = cliente_simple['idcliente']
@@ -1882,7 +2005,6 @@ class SistemaVentas:
                 self.pausa()
                 return
         
-        # Opción 2: Cédula de Identidad
         elif opcion_ident == '2':
             print("\n🆔 FACTURA CON CÉDULA")
             print("="*40)
@@ -1890,35 +2012,29 @@ class SistemaVentas:
             print("Formato: V12345678 o E87654321")
             cedula = input("Cédula: ").upper()
             
-            # Validar formato de cédula
             if not (cedula.startswith('V') or cedula.startswith('E')):
                 print("❌ Formato inválido. Debe comenzar con V o E")
                 self.pausa()
                 return
             
-            # Buscar cliente por cédula
             cliente_simple = self.cliente_service.buscar_por_documento(cedula)
             
             if cliente_simple:
-                # Cliente existe
                 idcliente = cliente_simple['idcliente']
                 cliente = self.cliente_service.obtener_por_id(idcliente)
                 print(f"✅ Cliente encontrado: {cliente['nombre']} {cliente['apellidos']}")
             else:
-                # Cliente no existe - opción de crearlo rápido
                 print("\n📝 Cliente no registrado")
                 print("¿Desea registrarlo ahora?")
                 print("1. Sí, crear registro rápido")
                 print("2. No, continuar como consumidor final")
-                subop = input("🔹 Seleccione: ").strip()
+                subop = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
                 
                 if subop == '1':
-                    # Crear cliente rápido con datos mínimos
                     print("\n📝 DATOS MÍNIMOS DEL CLIENTE")
                     nombre = input("Nombre: ")
                     apellidos = input("Apellidos: ")
                     
-                    # Extraer tipo y número
                     tipo_doc = cedula[0]
                     num_doc = cedula[1:]
                     
@@ -1927,7 +2043,6 @@ class SistemaVentas:
                         None, None, None, None
                     ):
                         print("✅ Cliente registrado exitosamente")
-                        # Buscar el cliente recién creado
                         cliente_simple = self.cliente_service.buscar_por_documento(cedula)
                         if cliente_simple:
                             idcliente = cliente_simple['idcliente']
@@ -1937,24 +2052,58 @@ class SistemaVentas:
                         self.pausa()
                         return
                 else:
-                    # Opción 3: Consumidor final
                     opcion_ident = '3'
         
-        # Opción 3: Consumidor Final
         if opcion_ident == '3':
             print("\n🛒 CONSUMIDOR FINAL")
             print("="*40)
             print("✅ Venta sin identificación de cliente")
             idcliente = None
-            tipo_documento = None
-            num_documento = None
         
-        # Si no hay cliente seleccionado (consumidor final), preguntar tipo de comprobante
+        # Continuar con el flujo normal de venta
+        return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
+
+    def _continuar_flujo_venta(self, usuario, idcliente, cliente, opcion_ident):
+        """Continuación del flujo de venta después de seleccionar cliente"""
+        
+        # ===== SELECCIÓN DE MONEDA =====
+        print("\n" + "="*60)
+        print("💰 SELECCIÓN DE MONEDA")
+        print("="*60)
+        print("1. 🇻🇪 Bolívares (VES)")
+        print("2. 🇺🇸 Dólares (USD)")
+        print("3. 🇪🇺 Euros (EUR)")
+        opcion_moneda = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de la factura: {self.COLOR_RESET}").strip()
+        
+        moneda_map = {'1': 'VES', '2': 'USD', '3': 'EUR'}
+        moneda = moneda_map.get(opcion_moneda, 'VES')
+        
+        # Mostrar tasa actual si es USD
+        if moneda == 'USD':
+            if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
+                tasa = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
+                if tasa:
+                    print(f"\n{self.COLOR_VERDE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
+                else:
+                    print(f"\n{self.COLOR_AMARILLO}⚠️ No hay tasa registrada. Se solicitará al momento de la venta.{self.COLOR_RESET}")
+        
+        # ===== MONEDA DE PAGO =====
+        print("\n" + "="*60)
+        print("💳 MONEDA DE PAGO")
+        print("="*60)
+        print("1. Misma moneda de la factura")
+        print("2. Dólares (USD)")
+        print("3. Bolívares (VES)")
+        opcion_pago = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de pago: {self.COLOR_RESET}").strip()
+        
+        moneda_pago_map = {'1': moneda, '2': 'USD', '3': 'VES'}
+        moneda_pago = moneda_pago_map.get(opcion_pago, moneda)
+        
+        # ===== DATOS DEL COMPROBANTE =====
         print("\n" + "="*60)
         print("📄 DATOS DEL COMPROBANTE")
         print("="*60)
         
-        # Tipos de comprobante según identificación
         if opcion_ident == '1':
             print("Tipo de comprobante:")
             print("  1. Factura (con RIF)")
@@ -1964,20 +2113,20 @@ class SistemaVentas:
             print("Tipo de comprobante:")
             print("  1. Factura (con Cédula)")
             print("  2. Boleta (consumo)")
-            tipo_op = input("Seleccione: ").strip()
+            tipo_op = input(f"{self.COLOR_AMARILLO}Seleccione: {self.COLOR_RESET}").strip()
             tipo_comprobante = 'FACTURA' if tipo_op == '1' else 'BOLETA'
-        else:  # Consumidor final
+        else:
             print("Tipo de comprobante:")
             print("  1. Boleta (consumo final)")
             print("  2. Ticket (consumo final)")
             tipo_map = {'1': 'BOLETA', '2': 'TICKET'}
-            tipo_op = input("Seleccione: ").strip()
+            tipo_op = input(f"{self.COLOR_AMARILLO}Seleccione: {self.COLOR_RESET}").strip()
             tipo_comprobante = tipo_map.get(tipo_op, 'BOLETA')
         
         serie = input("Serie (ej. F001): ")
         numero = input("Número: ")
         
-        # Detalle de venta
+        # ===== AGREGAR PRODUCTOS =====
         detalle = []
         print("\n" + "="*50)
         print("🛒 AGREGAR PRODUCTOS")
@@ -1985,7 +2134,7 @@ class SistemaVentas:
         
         while True:
             print("\n--- Agregar producto ---")
-            codigo = input("Código del artículo (0 para terminar, '?' para ver lista): ")
+            codigo = input("Código del artículo (0 para terminar, '?' para ver lista): ").lower()
             
             if codigo == '0':
                 break
@@ -2005,7 +2154,6 @@ class SistemaVentas:
                 print("❌ Artículo no encontrado. Use '?' para ver la lista.")
                 continue
             
-            # Verificar stock
             stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
             print(f"📌 Artículo: {art['nombre']} - Stock disponible: {stock} unidades")
             
@@ -2031,63 +2179,72 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Resumen de venta
+        # ===== RESUMEN DE VENTA =====
         print("\n" + "="*50)
         print("📋 RESUMEN DE VENTA")
         print("="*50)
         
-        if opcion_ident == '1':
+        if opcion_ident == '1' and cliente:
             print(f"Tipo: FACTURA CON RIF")
-            if cliente:
-                print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
-                print(f"RIF: {cliente['tipo_documento']}-{cliente['num_documento']}")
-        elif opcion_ident == '2':
+            print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
+            print(f"RIF: {cliente['tipo_documento']}-{cliente['num_documento']}")
+        elif opcion_ident == '2' and cliente:
             print(f"Tipo: FACTURA CON CÉDULA")
-            if cliente:
-                print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
-                print(f"Cédula: {cliente['tipo_documento']}-{cliente['num_documento']}")
+            print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
+            print(f"Cédula: {cliente['tipo_documento']}-{cliente['num_documento']}")
         else:
             print(f"Tipo: {tipo_comprobante} - CONSUMIDOR FINAL")
             print("Cliente: No identificado")
             print(f"ℹ️ {MENSAJES_LEGALES['consumidor_final']}")
         
+        print(f"Moneda factura: {moneda}")
+        print(f"Moneda pago: {moneda_pago}")
         print(f"Comprobante: {tipo_comprobante} {serie}-{numero}")
         print("\nProductos:")
+        
         total = 0
-        iva_total = 0
         for item in detalle:
             art = self.articulo_service.obtener_por_id(item['idarticulo'])
             subtotal = item['cantidad'] * item['precio_venta']
-            iva = subtotal * 0.16  # 16% IVA
             total += subtotal
-            iva_total += iva
             print(f"  - {art['nombre']}: {item['cantidad']} x {item['precio_venta']:.2f} = {subtotal:.2f}")
+        
+        iva_total = total * 0.16
+        total_con_iva = total + iva_total
         
         print(f"\n💰 SUBTOTAL: Bs. {total:.2f}")
         print(f"💰 IVA (16%): Bs. {iva_total:.2f}")
-        print(f"💰 TOTAL: Bs. {total + iva_total:.2f}")
+        
+        if moneda == 'USD':
+            print(f"💰 TOTAL: ${total_con_iva:.2f} USD")
+        elif moneda == 'EUR':
+            print(f"💰 TOTAL: €{total_con_iva:.2f} EUR")
+        else:
+            print(f"💰 TOTAL: Bs. {total_con_iva:.2f}")
+        
         print("="*50)
         
-        confirmar = input("¿Confirmar venta? (s/N): ").lower()
+        confirmar = input(f"{self.COLOR_AMARILLO}¿Confirmar venta? (s/N): {self.COLOR_RESET}").lower()
         if confirmar != 's':
             print("Operación cancelada")
             self.pausa()
             return
         
-        # Registrar venta
-        usuario = self.trabajador_service.get_usuario_actual()
+        # ===== REGISTRAR VENTA =====
         idventa = self.venta_service.registrar(
             usuario['idtrabajador'], 
-            idcliente,  # Puede ser None
+            idcliente,
             tipo_comprobante,
             serie, 
             numero, 
-            16.0,  # IGV
-            detalle
+            16.0,
+            detalle,
+            moneda=moneda,
+            moneda_pago=moneda_pago
         )
         
         if idventa:
-            print(f"\n✅ Venta #{idventa} registrada correctamente")
+            print(f"\n{self.COLOR_VERDE}✅ Venta #{idventa} registrada correctamente{self.COLOR_RESET}")
             print("="*50)
             print("🎫 DATOS DE LA FACTURA:")
             print(f"   Número: {tipo_comprobante} {serie}-{numero}")
@@ -2102,22 +2259,124 @@ class SistemaVentas:
                 print("   Cliente: CONSUMIDOR FINAL")
                 print("   Identificación: No aplica")
             
-            print(f"   Total: Bs. {total + iva_total:.2f}")
+            if moneda == 'USD':
+                print(f"   Total: ${total_con_iva:.2f} USD")
+            elif moneda == 'EUR':
+                print(f"   Total: €{total_con_iva:.2f} EUR")
+            else:
+                print(f"   Total: Bs. {total_con_iva:.2f}")
+            
+            print(f"   Moneda pago: {moneda_pago}")
             print(f"   {MENSAJES_LEGALES['factura_digital']}")
             print("="*50)
             
-            # Registrar en auditoría
             tipo_cliente = "CONSUMIDOR FINAL" if not idcliente else "CLIENTE IDENTIFICADO"
             self.registrar_auditoria(
                 accion="CREAR",
                 tabla="venta",
                 registro_id=idventa,
-                datos_nuevos=f"Venta #{idventa} - {tipo_cliente} - Total: Bs.{total + iva_total:.2f}"
+                datos_nuevos=f"Venta #{idventa} - {tipo_cliente} - Total: {total_con_iva:.2f} {moneda}"
             )
         else:
-            print("\n❌ Error al registrar la venta")
+            print(f"\n{self.COLOR_ROJO}❌ Error al registrar la venta{self.COLOR_RESET}")
         
         self.pausa()
+
+    def _buscar_por_cedula_rapido(self, usuario):
+        """Búsqueda rápida de cliente por cédula (atajo F9)"""
+        print("\n" + "="*60)
+        print("🔍 BÚSQUEDA RÁPIDA POR CÉDULA")
+        print("="*60)
+        
+        cedula = input("Ingrese cédula (ej: V12345678): ").upper()
+        
+        if not (cedula.startswith('V') or cedula.startswith('E')):
+            print(f"{self.COLOR_ROJO}❌ Formato inválido{self.COLOR_RESET}")
+            self.pausa()
+            return self._registrar_venta()
+        
+        cliente_simple = self.cliente_service.buscar_por_documento(cedula)
+        
+        if cliente_simple:
+            idcliente = cliente_simple['idcliente']
+            cliente = self.cliente_service.obtener_por_id(idcliente)
+            print(f"{self.COLOR_VERDE}✅ Cliente encontrado: {cliente['nombre']} {cliente['apellidos']}{self.COLOR_RESET}")
+            
+            # Determinar opción de identificación
+            if cliente['tipo_documento'] in ['V', 'E']:
+                opcion_ident = '2'
+            else:
+                opcion_ident = '1'
+            
+            return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
+        else:
+            print(f"{self.COLOR_AMARILLO}⚠️ Cliente no encontrado{self.COLOR_RESET}")
+            print("1. Registrar nuevo cliente")
+            print("2. Continuar como consumidor final")
+            print("3. Volver")
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+            
+            if opcion == '1':
+                self._crear_cliente()
+                return self._registrar_venta()
+            elif opcion == '2':
+                return self._continuar_venta_consumidor_final(usuario)
+            else:
+                return self._registrar_venta()
+
+    def _buscar_por_rif_rapido(self, usuario):
+        """Búsqueda rápida de cliente por RIF (atajo F10)"""
+        print("\n" + "="*60)
+        print("🔍 BÚSQUEDA RÁPIDA POR RIF")
+        print("="*60)
+        
+        rif = input("Ingrese RIF (ej: J123456789): ").upper()
+        
+        cliente_simple = self.cliente_service.buscar_por_documento(rif)
+        
+        if cliente_simple:
+            idcliente = cliente_simple['idcliente']
+            cliente = self.cliente_service.obtener_por_id(idcliente)
+            print(f"{self.COLOR_VERDE}✅ Cliente encontrado: {cliente['nombre']} {cliente['apellidos']}{self.COLOR_RESET}")
+            
+            # Determinar opción de identificación
+            if cliente['tipo_documento'] in ['J', 'G', 'C']:
+                opcion_ident = '1'
+            else:
+                opcion_ident = '2'
+            
+            return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
+        else:
+            print(f"{self.COLOR_AMARILLO}⚠️ Cliente no encontrado{self.COLOR_RESET}")
+            print("1. Registrar nuevo cliente")
+            print("2. Volver")
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+            
+            if opcion == '1':
+                self._crear_cliente()
+                return self._registrar_venta()
+            else:
+                return self._registrar_venta()
+
+    def _continuar_venta_consumidor_final(self, usuario):
+        """Continúa directamente con venta a consumidor final (sin preguntar)"""
+        print(f"\n{self.COLOR_VERDE}🛒 Venta a CONSUMIDOR FINAL{self.COLOR_RESET}")
+        idcliente = None
+        cliente = None
+        opcion_ident = '3'
+        
+        # Continuar con el resto del flujo de venta
+        return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
+    
+    def _continuar_venta_con_cliente(self, idcliente, cliente):
+        """Continúa el flujo de venta con un cliente ya seleccionado"""
+        # Aquí iría la continuación de la venta
+        # Por ahora, redirigimos al método principal con los datos
+        print(f"\nContinuando venta con cliente: {cliente['nombre']} {cliente['apellidos']}")
+        # Este método debería continuar con el flujo normal
+        # Por ahora, volvemos al menú principal de ventas
+        self.pausa()
+        self.menu_ventas()
     
     def _mostrar_lista_articulos(self):
         """Muestra lista de artículos disponibles"""
@@ -2131,7 +2390,7 @@ class SistemaVentas:
     
     @requiere_permiso('ventas_ver')
     def _listar_ventas(self):
-        """Lista todas las ventas"""
+        """Lista todas las ventas con fecha y hora"""
         self.mostrar_cabecera("LISTADO DE VENTAS")
         
         ventas = self.venta_service.listar()
@@ -2139,18 +2398,26 @@ class SistemaVentas:
         if not ventas:
             print("📭 No hay ventas registradas")
         else:
-            print(f"{'ID':<5} {'FECHA':<12} {'COMPROBANTE':<20} {'CLIENTE':<25} {'ESTADO':<10}")
-            print("-" * 72)
+            print(f"{'ID':<5} {'FECHA Y HORA':<19} {'COMPROBANTE':<20} {'CLIENTE':<25} {'ESTADO':<10}")
+            print("-" * 79)
             for v in ventas:
                 comp = f"{v['tipo_comprobante']} {v['serie']}-{v['numero_comprobante']}"
-                cliente_nombre = v.get('cliente', 'CONSUMIDOR FINAL')
-                print(f"{v['idventa']:<5} {v['fecha']:<12} {comp:<20} {cliente_nombre:<25} {v['estado']:<10}")
+                
+                # CORREGIDO: Manejar cliente_nombre cuando es None
+                cliente_nombre = v.get('cliente')
+                if cliente_nombre is None:
+                    cliente_nombre = 'CONSUMIDOR FINAL'
+                
+                # Truncar si es muy largo
+                if len(cliente_nombre) > 25:
+                    cliente_nombre = cliente_nombre[:22] + "..."
+                    
+                print(f"{v['idventa']:<5} {v['fecha']:<19} {comp:<20} {cliente_nombre:<25} {v['estado']:<10}")
         
         self.pausa()
-    
     @requiere_permiso('ventas_ver')
     def _ver_venta(self):
-        """Muestra detalle de una venta"""
+        """Muestra detalle de una venta con hora exacta"""
         self.mostrar_cabecera("DETALLE DE VENTA")
         
         try:
@@ -2163,8 +2430,13 @@ class SistemaVentas:
                 return
             
             print(f"\n📌 Venta N°: {venta['idventa']}")
-            print(f"📌 Fecha: {venta['fecha']}")
-            cliente_nombre = venta.get('cliente', 'CONSUMIDOR FINAL')
+            print(f"📌 Fecha y Hora: {venta['fecha']}")
+            
+            # CORREGIDO: Manejar cliente cuando es None
+            cliente_nombre = venta.get('cliente')
+            if cliente_nombre is None:
+                cliente_nombre = 'CONSUMIDOR FINAL'
+                
             print(f"📌 Cliente: {cliente_nombre}")
             print(f"📌 Comprobante: {venta['tipo_comprobante']} {venta['serie']}-{venta['numero_comprobante']}")
             print(f"📌 IGV: {venta['igv']}%")
@@ -2180,18 +2452,16 @@ class SistemaVentas:
                     print(f"   - {d['articulo']} x{d['cantidad']} @ {d['precio_venta']:.2f} = {subtotal:.2f}")
                 print(f"\n💰 TOTAL: {total:.2f}")
                 
-            # Mostrar log de auditoría de esta venta
             print("\n📋 REGISTROS DE AUDITORÍA:")
             logs = self.auditoria_service.consultar_por_tabla("venta", idventa)
             for log in logs:
-                print(f"   - {log['fecha_hora']}: {log['accion']}")
+                fecha_log = log['fecha_hora'].strftime('%d/%m/%Y %H:%M') if hasattr(log['fecha_hora'], 'strftime') else log['fecha_hora']
+                print(f"   - {fecha_log}: {log['accion']}")
         
         except Exception as e:
             print(f"❌ Error: {e}")
         
         self.pausa()
-    
-    @requiere_permiso('ventas_anular')
     def _anular_venta(self):
         """Anula una venta"""
         self.mostrar_cabecera("ANULAR VENTA")
@@ -2216,10 +2486,10 @@ class SistemaVentas:
             total = sum(d['cantidad'] * d['precio_venta'] for d in venta.get('detalle', []))
             print(f"Total: {total:.2f}")
             
-            confirmacion = input("\n¿Está seguro de anular esta venta? (s/N): ").lower()
+            confirmacion = input(f"{self.COLOR_AMARILLO}\n¿Está seguro de anular esta venta? (s/N): {self.COLOR_RESET}").lower()
             if confirmacion == 's':
                 if self.venta_service.anular(idventa):
-                    print("✅ Venta anulada correctamente")
+                    print(f"{self.COLOR_VERDE}✅ Venta anulada correctamente{self.COLOR_RESET}")
                     
                     self.registrar_auditoria(
                         accion="ANULAR",
@@ -2228,7 +2498,7 @@ class SistemaVentas:
                         datos_nuevos=f"Venta #{idventa} anulada - Total: Bs.{total:.2f}"
                     )
                 else:
-                    print("❌ Error al anular la venta")
+                    print(f"{self.COLOR_ROJO}❌ Error al anular la venta{self.COLOR_RESET}")
             else:
                 print("Operación cancelada")
         
@@ -2239,7 +2509,7 @@ class SistemaVentas:
     
     @requiere_permiso('proveedores_ver')
     def menu_proveedores(self):
-        """Menú de gestión de proveedores (archivos opcionales)"""
+        """Menú de gestión de proveedores"""
         while True:
             self.mostrar_cabecera("GESTIÓN DE PROVEEDORES")
             print("1. Listar proveedores")
@@ -2251,7 +2521,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._listar_proveedores()
@@ -2273,7 +2543,7 @@ class SistemaVentas:
     
     @requiere_permiso('proveedores_crear')
     def _crear_proveedor(self):
-        """Crea un nuevo proveedor con validación venezolana"""
+        """Crea un nuevo proveedor"""
         self.mostrar_cabecera("CREAR PROVEEDOR")
         
         print("📝 Complete los datos del proveedor:")
@@ -2282,27 +2552,15 @@ class SistemaVentas:
         razon_social = input("Razón Social / Nombre: ")
         sector = input("Sector Comercial: ")
         
-        # Selección de tipo de persona
         print("\n" + "="*60)
         print("🔍 TIPO DE PERSONA - FORMATO DEL DOCUMENTO")
         print("="*60)
         print("1. 🇻🇪 Persona Natural Venezolana  →  V12345678")
-        print("   (Letra V + 8 dígitos de cédula)")
-        print("-"*60)
         print("2. 🌎 Persona Natural Extranjera   →  E87654321")
-        print("   (Letra E + 8 dígitos de cédula)")
-        print("-"*60)
         print("3. 🏢 Persona Jurídica (Empresa)   →  J12345678")
-        print("   (Letra J + 8 dígitos de RIF)")
-        print("-"*60)
         print("4. 🏛️ Gobierno / Institución        →  G12345678")
-        print("   (Letra G + 8 dígitos de RIF)")
-        print("-"*60)
         print("5. 👥 Consejo Comunal               →  C12345678")
-        print("   (Letra C + 8 dígitos de RIF)")
-        print("-"*60)
         print("6. 🛂 Pasaporte                      →  Número de pasaporte")
-        print("   (6-12 caracteres, sin letra especial)")
         print("="*60)
         
         tipo_persona = input("Seleccione tipo de persona (1-6): ").strip()
@@ -2318,7 +2576,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'V'")
                 self.pausa()
                 return
-            num_doc = num_doc[1:]  # Quitar la V para guardar solo números
+            num_doc = num_doc[1:]
             
         elif tipo_persona == '2':
             tipo_doc = 'E'
@@ -2331,7 +2589,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'E'")
                 self.pausa()
                 return
-            num_doc = num_doc[1:]  # Quitar la E
+            num_doc = num_doc[1:]
             
         elif tipo_persona == '3':
             tipo_doc = 'J'
@@ -2344,7 +2602,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'J'")
                 self.pausa()
                 return
-            num_doc = num_doc[1:]  # Quitar la J
+            num_doc = num_doc[1:]
             
         elif tipo_persona == '4':
             tipo_doc = 'G'
@@ -2357,7 +2615,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'G'")
                 self.pausa()
                 return
-            num_doc = num_doc[1:]  # Quitar la G
+            num_doc = num_doc[1:]
             
         elif tipo_persona == '5':
             tipo_doc = 'C'
@@ -2370,7 +2628,7 @@ class SistemaVentas:
                 print("❌ El documento debe comenzar con 'C'")
                 self.pausa()
                 return
-            num_doc = num_doc[1:]  # Quitar la C
+            num_doc = num_doc[1:]
             
         elif tipo_persona == '6':
             tipo_doc = 'PASAPORTE'
@@ -2384,7 +2642,6 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Datos opcionales
         direccion = input("\nDirección (opcional): ") or None
         telefono = input("Teléfono (opcional): ") or None
         email = input("Email (opcional): ") or None
@@ -2409,7 +2666,7 @@ class SistemaVentas:
     
     @requiere_permiso('proveedores_ver')
     def _listar_proveedores(self):
-        """Lista todos los proveedores con indicador de archivos"""
+        """Lista todos los proveedores"""
         self.mostrar_cabecera("LISTADO DE PROVEEDORES")
         
         proveedores = self.proveedor_service.listar()
@@ -2422,10 +2679,8 @@ class SistemaVentas:
             for p in proveedores:
                 archivos = self.proveedor_archivo_service.listar_archivos_proveedor(p['idproveedor'])
                 tiene_archivos = "📁" if archivos else ""
-                
                 documento = f"{p['tipo_documento']}-{p['num_documento']}"
                 telefono_val = p.get('telefono', '') or ''
-                
                 print(f"{p['idproveedor']:<5} {p['razon_social']:<30} {documento:<20} {telefono_val:<15} {tiene_archivos:<10}")
         
         self.pausa()
@@ -2437,7 +2692,7 @@ class SistemaVentas:
         
         print("1. Buscar por ID")
         print("2. Buscar por documento")
-        opcion = input("🔹 Seleccione: ").strip()
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
         
         if opcion == '1':
             try:
@@ -2485,7 +2740,7 @@ class SistemaVentas:
         self.pausa()
     
     def _mostrar_detalle_proveedor(self, p):
-        """Muestra detalles completos de un proveedor con sus archivos"""
+        """Muestra detalles completos de un proveedor"""
         print(f"\n📌 ID: {p['idproveedor']}")
         print(f"📌 Razón Social: {p['razon_social']}")
         print(f"📌 Sector Comercial: {p.get('sector_comercial', 'No especificado')}")
@@ -2501,7 +2756,6 @@ class SistemaVentas:
             for a in archivos:
                 tamano = self.proveedor_archivo_service.obtener_tamano_legible(a['tamano'])
                 print(f"   - {a['nombre_archivo']} ({tamano})")
-            print("   (Use opción 6 en menú de proveedores para gestionar)")
         else:
             print("\n📁 No hay archivos asociados")
     
@@ -2523,7 +2777,6 @@ class SistemaVentas:
             print("(Deje en blanco para mantener el valor actual)")
             print()
             
-            # Guardar datos anteriores para auditoría
             datos_anteriores = f"Proveedor: {proveedor['razon_social']}, Doc: {proveedor['tipo_documento']}-{proveedor['num_documento']}"
             
             razon = input(f"Razón Social [{proveedor['razon_social']}]: ") or proveedor['razon_social']
@@ -2707,7 +2960,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._subir_archivo_proveedor(idproveedor)
@@ -2761,7 +3014,7 @@ class SistemaVentas:
         self.pausa()
     
     def _descargar_archivo_por_id(self, idarchivo):
-        """Descarga un archivo por su ID (usado en listado global)"""
+        """Descarga un archivo por su ID"""
         archivo = self.proveedor_archivo_service.obtener_archivo(idarchivo)
         if not archivo:
             print(f"❌ No existe archivo con ID {idarchivo}")
@@ -2794,7 +3047,6 @@ class SistemaVentas:
         self.pausa()
     
     def _descargar_archivo_por_id_menu(self, idproveedor):
-        """Descarga un archivo desde el menú específico de proveedor"""
         try:
             idarchivo = int(input("ID del archivo a descargar: "))
             self._descargar_archivo_por_id(idarchivo)
@@ -2803,7 +3055,6 @@ class SistemaVentas:
             self.pausa()
     
     def _eliminar_archivo_por_id(self, idarchivo):
-        """Elimina un archivo por su ID"""
         confirmacion = input(f"¿Está seguro de eliminar el archivo ID {idarchivo}? (s/N): ").lower()
         if confirmacion == 's':
             if self.proveedor_archivo_service.eliminar_archivo(idarchivo):
@@ -2823,7 +3074,6 @@ class SistemaVentas:
         self.pausa()
     
     def _eliminar_archivo_por_id_menu(self, idproveedor):
-        """Elimina un archivo desde el menú específico de proveedor"""
         try:
             idarchivo = int(input("ID del archivo a eliminar: "))
             self._eliminar_archivo_por_id(idarchivo)
@@ -2835,7 +3085,6 @@ class SistemaVentas:
         """Lista todos los archivos de todos los proveedores"""
         self.mostrar_cabecera("LISTA DE PROVEEDORES (ARCHIVOS)")
         
-        # Obtener todos los proveedores
         proveedores = self.proveedor_service.listar()
         
         todos_archivos = []
@@ -2870,7 +3119,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 try:
@@ -2902,7 +3151,6 @@ class SistemaVentas:
                 self.pausa()
     
     def _subir_archivo_con_seleccion_proveedor(self):
-        """Sube un archivo seleccionando primero el proveedor"""
         proveedores = self.proveedor_service.listar()
         if not proveedores:
             print("❌ No hay proveedores registrados")
@@ -2932,15 +3180,14 @@ class SistemaVentas:
     
     @requiere_permiso('inventario_ver')
     def menu_inventario(self):
-        """Menú de gestión de inventario con alertas de stock"""
+        """Menú de gestión de inventario"""
         while True:
             self.mostrar_cabecera("GESTIÓN DE INVENTARIO")
             
-            # Mostrar alertas al entrar al menú
             alertas = self.inventario_service.obtener_alertas_stock()
             if alertas:
                 print("⚠️ ALERTAS DE STOCK:")
-                for alerta in alertas[:3]:  # Mostrar primeras 3 alertas
+                for alerta in alertas[:3]:
                     print(f"   {alerta}")
                 print()
             
@@ -2953,7 +3200,7 @@ class SistemaVentas:
             print("0. Volver")
             print()
             
-            opcion = input("🔹 Seleccione una opción: ").strip()
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
             
             if opcion == '1':
                 self._ver_stock_completo()
@@ -2974,19 +3221,16 @@ class SistemaVentas:
                 self.pausa()
     
     def _ver_stock_completo(self):
-        """Muestra tabla completa de stock con colores"""
         self.mostrar_cabecera("STOCK COMPLETO")
         print(self.inventario_service.mostrar_tabla_stock())
         self.pausa()
     
     def _ver_resumen_inventario(self):
-        """Muestra resumen del inventario"""
         self.mostrar_cabecera("RESUMEN DE INVENTARIO")
         print(self.inventario_service.mostrar_resumen_stock())
         self.pausa()
     
     def _ver_stock_critico(self):
-        """Muestra solo artículos con stock crítico"""
         self.mostrar_cabecera("STOCK CRÍTICO (menos de 3 unidades)")
         
         articulos = self.inventario_service.listar_con_stock()
@@ -3003,7 +3247,6 @@ class SistemaVentas:
         self.pausa()
     
     def _ver_stock_bajo(self):
-        """Muestra artículos con stock bajo (entre 3 y 5 unidades)"""
         self.mostrar_cabecera("STOCK BAJO (entre 3 y 5 unidades)")
         
         articulos = self.inventario_service.listar_con_stock()
@@ -3020,7 +3263,6 @@ class SistemaVentas:
         self.pausa()
     
     def _ver_detalle_stock(self):
-        """Muestra detalle de un artículo específico"""
         self.mostrar_cabecera("DETALLE DE STOCK")
         
         try:
@@ -3051,7 +3293,6 @@ class SistemaVentas:
         """Registra un nuevo ingreso de mercancía"""
         self.mostrar_cabecera("REGISTRAR INGRESO")
         
-        # Verificar que haya proveedores
         proveedores = self.proveedor_service.listar()
         if not proveedores:
             print("❌ No hay proveedores registrados.")
@@ -3059,7 +3300,6 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Seleccionar proveedor
         print("Proveedores disponibles:")
         for p in proveedores:
             print(f"  {p['idproveedor']}. {p['razon_social']}")
@@ -3076,7 +3316,6 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Datos del ingreso
         print("\nTipo de comprobante:")
         print("  1. Factura")
         print("  2. Boleta")
@@ -3088,12 +3327,10 @@ class SistemaVentas:
         serie = input("Serie (ej. F001): ")
         numero = input("Número: ")
         
-        # Detalle del ingreso
         detalle = []
         print("\n📦 AGREGAR PRODUCTOS AL INGRESO")
         print("="*40)
         
-        # Mostrar lista de artículos disponibles
         print("\n📋 ARTÍCULOS DISPONIBLES:")
         articulos = self.articulo_service.listar()
         if not articulos:
@@ -3104,14 +3341,7 @@ class SistemaVentas:
         print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20}")
         print("-" * 70)
         for a in articulos:
-            cat_nombre = a.get('categoria', '')
-            if not cat_nombre:
-                idcat = a.get('idcategoria')
-                if idcat:
-                    categoria = self.categoria_service.obtener_por_id(idcat)
-                    cat_nombre = categoria['nombre'] if categoria else 'N/A'
-                else:
-                    cat_nombre = 'N/A'
+            cat_nombre = a.get('categoria', '') or 'N/A'
             print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {cat_nombre:<20}")
         print()
         
@@ -3126,14 +3356,7 @@ class SistemaVentas:
                 print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20}")
                 print("-" * 70)
                 for a in articulos:
-                    cat_nombre = a.get('categoria', '')
-                    if not cat_nombre:
-                        idcat = a.get('idcategoria')
-                        if idcat:
-                            categoria = self.categoria_service.obtener_por_id(idcat)
-                            cat_nombre = categoria['nombre'] if categoria else 'N/A'
-                        else:
-                            cat_nombre = 'N/A'
+                    cat_nombre = a.get('categoria', '') or 'N/A'
                     print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {cat_nombre:<20}")
                 continue
             
@@ -3149,17 +3372,7 @@ class SistemaVentas:
                 print("❌ Artículo no encontrado. Use '?' para ver la lista.")
                 continue
             
-            categoria_nombre = art.get('categoria', '')
-            if not categoria_nombre:
-                idcat = art.get('idcategoria')
-                if idcat:
-                    categoria = self.categoria_service.obtener_por_id(idcat)
-                    if categoria:
-                        categoria_nombre = categoria['nombre']
-                    else:
-                        categoria_nombre = 'No especificada'
-                else:
-                    categoria_nombre = 'No especificada'
+            categoria_nombre = art.get('categoria', '') or 'No especificada'
             
             print(f"📌 Artículo seleccionado: {art['nombre']}")
             print(f"   Código: {art['codigo']}")
@@ -3205,7 +3418,7 @@ class SistemaVentas:
         print(f"\n💰 TOTAL: Bs.{total:.2f}")
         print("="*50)
         
-        confirmar = input("¿Confirmar ingreso? (s/N): ").lower()
+        confirmar = input(f"{self.COLOR_AMARILLO}¿Confirmar ingreso? (s/N): {self.COLOR_RESET}").lower()
         if confirmar != 's':
             print("Operación cancelada")
             self.pausa()
@@ -3218,7 +3431,7 @@ class SistemaVentas:
         )
         
         if idingreso:
-            print(f"\n✅ Ingreso #{idingreso} registrado correctamente")
+            print(f"\n{self.COLOR_VERDE}✅ Ingreso #{idingreso} registrado correctamente{self.COLOR_RESET}")
             print("📦 Stock actualizado automáticamente")
             
             self.registrar_auditoria(
@@ -3228,7 +3441,7 @@ class SistemaVentas:
                 datos_nuevos=f"Ingreso #{idingreso} - Proveedor: {proveedor['razon_social']} - Total: Bs.{total:.2f}"
             )
         else:
-            print("\n❌ Error al registrar el ingreso")
+            print(f"\n{self.COLOR_ROJO}❌ Error al registrar el ingreso{self.COLOR_RESET}")
         
         self.pausa()
     
@@ -3289,7 +3502,7 @@ class SistemaVentas:
                 else:
                     self.menu_login()
             elif opcion == '0':
-                print("\n👋 ¡Hasta luego!")
+                print(f"\n{self.COLOR_VERDE}👋 ¡Hasta luego!{self.COLOR_RESET}")
                 break
             else:
                 print("❌ Opción no válida")

@@ -1,5 +1,5 @@
 """
-Servicio para la gestión de inventario y stock
+Servicio para la gestión de inventario y stock - VERSIÓN CORREGIDA
 """
 from loguru import logger
 from capa_negocio.base_service import BaseService
@@ -25,41 +25,70 @@ class InventarioService(BaseService):
     
     def obtener_stock_articulo(self, idarticulo):
         """
-        Obtiene el stock actual de un artículo
-        
-        Args:
-            idarticulo (int): ID del artículo
-            
-        Returns:
-            int: Stock actual o 0 si no existe
+        Obtiene el stock actual de un artículo desde la tabla kardex
         """
         try:
-            # Validar ID
             if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
                 return 0
             
-            # Stock simulado para pruebas
-            stocks = {
-                1: 10,  # Laptop HP
-                2: 5,   # Mouse inalámbrico
-                3: 2,   # Teclado
-            }
-            stock = stocks.get(idarticulo, 0)
-            logger.info(f"Stock del artículo {idarticulo}: {stock} unidades")
-            return stock
+            # Obtener conexión
+            conn = self.articulo_service.repositorio.conn
+            cursor = conn.cursor()
+            
+            # Consultar el último stock registrado en kardex
+            query = """
+            SELECT TOP 1 stock_nuevo 
+            FROM kardex 
+            WHERE idarticulo = ? 
+            ORDER BY fecha_movimiento DESC
+            """
+            cursor.execute(query, (idarticulo,))
+            row = cursor.fetchone()
+            
+            if row and row[0] is not None:
+                stock = row[0]
+                logger.info(f"Stock del artículo {idarticulo} desde kardex: {stock} unidades")
+                return stock
+            else:
+                # Si no hay movimientos, stock inicial = 0
+                logger.warning(f"No hay registros en kardex para artículo {idarticulo}")
+                return 0
             
         except Exception as e:
             logger.error(f"Error al obtener stock del artículo {idarticulo}: {e}")
             return 0
     
-    def descontar_stock(self, idarticulo, cantidad, idventa=None):
+    def _insertar_stock_inicial(self, idarticulo):
         """
-        Descuenta stock de un artículo por una venta
+        Inserta un registro de stock inicial para un artículo
+        Usa 'INGRESO' como tipo_movimiento para cumplir con la restricción CHECK
+        """
+        try:
+            conn = self.articulo_service.repositorio.conn
+            cursor = conn.cursor()
+            
+            # CORREGIDO: Usar 'INGRESO' en lugar de 'INICIAL' para cumplir con la restricción
+            query = """
+            INSERT INTO kardex 
+            (idarticulo, tipo_movimiento, documento_referencia, cantidad, 
+             precio_unitario, valor_total, stock_anterior, stock_nuevo, fecha_movimiento)
+            VALUES (?, 'INGRESO', 'INVENTARIO INICIAL', 0, 0, 0, 0, 0, GETDATE())
+            """
+            cursor.execute(query, (idarticulo,))
+            conn.commit()
+            logger.info(f"📝 Stock inicial creado para artículo {idarticulo} (tipo: INGRESO)")
+        except Exception as e:
+            logger.error(f"Error al insertar stock inicial: {e}")
+    
+    def descontar_stock(self, idarticulo, cantidad, idventa=None, precio_unitario=None):
+        """
+        Descuenta stock de un artículo por una venta (ACTUALIZA KARDEX)
         
         Args:
             idarticulo (int): ID del artículo
             cantidad (int): Cantidad a descontar
             idventa (int, optional): ID de la venta asociada
+            precio_unitario (float, optional): Precio de venta unitario
             
         Returns:
             bool: True si se descontó correctamente, False en caso contrario
@@ -72,7 +101,40 @@ class InventarioService(BaseService):
             if not self.validar_entero_positivo(cantidad, "Cantidad a descontar"):
                 return False
             
+            # Obtener stock actual
+            stock_actual = self.obtener_stock_articulo(idarticulo)
+            
+            if stock_actual < cantidad:
+                logger.error(f"Stock insuficiente. Disponible: {stock_actual}, Solicitado: {cantidad}")
+                return False
+            
+            # Calcular nuevo stock
+            stock_nuevo = stock_actual - cantidad
+            
+            # Calcular valor total
+            valor_total = cantidad * precio_unitario if precio_unitario else 0
+            
+            # Insertar en kardex
+            conn = self.articulo_service.repositorio.conn
+            cursor = conn.cursor()
+            
+            documento = f"VENTA-{idventa}" if idventa else "VENTA-DIRECTA"
+            
+            query = """
+            INSERT INTO kardex 
+            (idarticulo, tipo_movimiento, documento_referencia, cantidad, 
+             precio_unitario, valor_total, stock_anterior, stock_nuevo, fecha_movimiento)
+            VALUES (?, 'VENTA', ?, ?, ?, ?, ?, ?, GETDATE())
+            """
+            
+            cursor.execute(query, (idarticulo, documento, cantidad, precio_unitario, valor_total, stock_actual, stock_nuevo))
+            conn.commit()
+            
             logger.info(f"✅ Descontando {cantidad} unidades del artículo {idarticulo}")
+            logger.info(f"   Stock: {stock_actual} → {stock_nuevo}")
+            if precio_unitario:
+                logger.info(f"   Precio unitario: Bs. {precio_unitario:.2f}")
+                logger.info(f"   Valor total: Bs. {valor_total:.2f}")
             if idventa:
                 logger.info(f"   Venta asociada: #{idventa}")
             
@@ -82,14 +144,15 @@ class InventarioService(BaseService):
             logger.error(f"Error al descontar stock del artículo {idarticulo}: {e}")
             return False
     
-    def reponer_stock(self, idarticulo, cantidad, idingreso=None):
+    def reponer_stock(self, idarticulo, cantidad, idingreso=None, precio_compra=None):
         """
-        Repone stock de un artículo por un ingreso
+        Repone stock de un artículo por un ingreso (ACTUALIZA KARDEX)
         
         Args:
             idarticulo (int): ID del artículo
             cantidad (int): Cantidad a reponer
             idingreso (int, optional): ID del ingreso asociado
+            precio_compra (float, optional): Precio de compra unitario
             
         Returns:
             bool: True si se repuso correctamente, False en caso contrario
@@ -102,7 +165,34 @@ class InventarioService(BaseService):
             if not self.validar_entero_positivo(cantidad, "Cantidad a reponer"):
                 return False
             
+            # Obtener stock actual
+            stock_actual = self.obtener_stock_articulo(idarticulo)
+            stock_nuevo = stock_actual + cantidad
+            
+            # Calcular valor total
+            valor_total = cantidad * precio_compra if precio_compra else 0
+            
+            # Insertar en kardex
+            conn = self.articulo_service.repositorio.conn
+            cursor = conn.cursor()
+            
+            documento = f"INGRESO-{idingreso}" if idingreso else "INGRESO-MANUAL"
+            
+            query = """
+            INSERT INTO kardex 
+            (idarticulo, tipo_movimiento, documento_referencia, cantidad, 
+             precio_unitario, valor_total, stock_anterior, stock_nuevo, fecha_movimiento)
+            VALUES (?, 'INGRESO', ?, ?, ?, ?, ?, ?, GETDATE())
+            """
+            
+            cursor.execute(query, (idarticulo, documento, cantidad, precio_compra, valor_total, stock_actual, stock_nuevo))
+            conn.commit()
+            
             logger.info(f"✅ Reponiendo {cantidad} unidades del artículo {idarticulo}")
+            logger.info(f"   Stock: {stock_actual} → {stock_nuevo}")
+            if precio_compra:
+                logger.info(f"   Precio compra: Bs. {precio_compra:.2f}")
+                logger.info(f"   Valor total: Bs. {valor_total:.2f}")
             if idingreso:
                 logger.info(f"   Ingreso asociado: #{idingreso}")
             
@@ -147,16 +237,13 @@ class InventarioService(BaseService):
     def listar_con_stock(self):
         """
         Lista todos los artículos con su stock actual y nivel
-        
-        Returns:
-            list: Lista de artículos con información de stock
         """
         try:
             articulos = self.articulo_service.listar()
             resultado = []
             
             for art in articulos:
-                stock = self.obtener_stock_articulo(art['idarticulo'])
+                stock = self.obtener_stock_articulo(art['idarticulo'])  # <-- Usa el método corregido
                 nivel = self.obtener_nivel_stock(stock)
                 
                 resultado.append({
@@ -171,29 +258,14 @@ class InventarioService(BaseService):
                     'mensaje': nivel['mensaje']
                 })
             
+            # Ordenar por stock (opcional)
+            resultado.sort(key=lambda x: x['idarticulo'])
+            
             return resultado
             
         except Exception as e:
             logger.error(f"Error al listar artículos con stock: {e}")
             return []
-    
-    def obtener_alertas_stock(self):
-        """
-        Obtiene alertas de stock bajo y crítico
-        
-        Returns:
-            list: Lista de alertas formateadas
-        """
-        articulos = self.listar_con_stock()
-        alertas = []
-        
-        for art in articulos:
-            if art['nivel_stock'] == 'CRÍTICO':
-                alertas.append(f"{self.COLOR_ROJO}🔴 {art['nombre']} - Stock CRÍTICO ({art['stock_actual']} und){self.COLOR_RESET}")
-            elif art['nivel_stock'] == 'BAJO':
-                alertas.append(f"{self.COLOR_AMARILLO}🟡 {art['nombre']} - Stock BAJO ({art['stock_actual']} und){self.COLOR_RESET}")
-        
-        return alertas
     
     def mostrar_tabla_stock(self):
         """
@@ -253,3 +325,39 @@ class InventarioService(BaseService):
                     resumen.append(f"   - {art['nombre']} (Stock: {art['stock_actual']})")
         
         return "\n".join(resumen)
+    
+    def obtener_alertas_stock(self):
+        """
+        Obtiene alertas de stock bajo y crítico
+        
+        Returns:
+            list: Lista de alertas formateadas
+        """
+        articulos = self.listar_con_stock()
+        alertas = []
+        
+        for art in articulos:
+            if art['nivel_stock'] == 'CRÍTICO':
+                alertas.append(f"{self.COLOR_ROJO}🔴 {art['nombre']} - Stock CRÍTICO ({art['stock_actual']} und){self.COLOR_RESET}")
+            elif art['nivel_stock'] == 'BAJO':
+                alertas.append(f"{self.COLOR_AMARILLO}🟡 {art['nombre']} - Stock BAJO ({art['stock_actual']} und){self.COLOR_RESET}")
+        
+        return alertas
+    
+    def verificar_stock_para_venta(self, items):
+        """
+        Verifica si hay stock suficiente para una venta
+        
+        Args:
+            items (list): Lista de items con idarticulo y cantidad
+            
+        Returns:
+            tuple: (bool, list) - (aprobado, lista de errores)
+        """
+        errores = []
+        for item in items:
+            stock = self.obtener_stock_articulo(item['idarticulo'])
+            if item['cantidad'] > stock:
+                errores.append(f"Artículo {item['idarticulo']}: requiere {item['cantidad']}, disponible {stock}")
+        
+        return len(errores) == 0, errores
