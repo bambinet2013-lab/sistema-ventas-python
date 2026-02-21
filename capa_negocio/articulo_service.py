@@ -108,3 +108,33 @@ class ArticuloService(BaseService):
         if not self.validar_entero_positivo(idarticulo, "ID de artículo"):
             return False
         return self.repositorio.eliminar(idarticulo)
+
+    def buscar_por_codigo_barras(self, codigo):
+        """
+        NUEVO: Busca artículo por código de barras
+        """
+        try:
+            return self.repositorio.buscar_por_codigo_barras(codigo)
+        except Exception as e:
+            logger.error(f"Error buscando por código de barras {codigo}: {e}")
+            return None
+    
+    def buscar_por_plu(self, plu):
+        """
+        NUEVO: Busca artículo por código interno PLU
+        """
+        try:
+            return self.repositorio.buscar_por_plu(plu)
+        except Exception as e:
+            logger.error(f"Error buscando por PLU {plu}: {e}")
+            return None
+    
+    def buscar_por_nombre(self, termino):
+        """
+        NUEVO: Busca artículos por nombre (búsqueda parcial)
+        """
+        try:
+            return self.repositorio.buscar_por_nombre(termino)
+        except Exception as e:
+            logger.error(f"Error buscando por nombre {termino}: {e}")
+            return []

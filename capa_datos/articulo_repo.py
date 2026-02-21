@@ -369,3 +369,89 @@ class ArticuloRepositorio:
         except Exception as e:
             logger.error(f"Error al obtener artículos con stock bajo: {e}")
             return []
+
+    def buscar_por_codigo_barras(self, codigo):
+        """
+        NUEVO: Busca artículo por código de barras
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idarticulo, codigo, nombre, precio_venta, 
+                   tipo_medida, precio_por_kilo, es_pesado
+            FROM articulo 
+            WHERE codigo_barras = ?
+            """
+            cursor.execute(query, (codigo,))
+            
+            columns = [column[0] for column in cursor.description]
+            row = cursor.fetchone()
+            
+            if row:
+                result = {}
+                for i, col in enumerate(columns):
+                    result[col] = row[i]
+                return result
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error buscando por código de barras {codigo}: {e}")
+            return None
+    
+    def buscar_por_plu(self, plu):
+        """
+        NUEVO: Busca artículo por código interno PLU
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idarticulo, codigo, nombre, precio_venta,
+                   tipo_medida, precio_por_kilo, es_pesado
+            FROM articulo 
+            WHERE plu = ?
+            """
+            cursor.execute(query, (plu,))
+            
+            columns = [column[0] for column in cursor.description]
+            row = cursor.fetchone()
+            
+            if row:
+                result = {}
+                for i, col in enumerate(columns):
+                    result[col] = row[i]
+                return result
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error buscando por PLU {plu}: {e}")
+            return None
+    
+    def buscar_por_nombre(self, termino):
+        """
+        NUEVO: Busca artículos por nombre (búsqueda parcial)
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT idarticulo, codigo, nombre, precio_venta
+            FROM articulo 
+            WHERE nombre LIKE ? OR codigo LIKE ?
+            ORDER BY nombre
+            """
+            busqueda = f"%{termino}%"
+            cursor.execute(query, (busqueda, busqueda))
+            
+            columns = [column[0] for column in cursor.description]
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                row_dict = {}
+                for i, col in enumerate(columns):
+                    row_dict[col] = row[i]
+                result.append(row_dict)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error buscando por nombre '{termino}': {e}")
+            return []

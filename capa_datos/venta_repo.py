@@ -17,21 +17,26 @@ class VentaRepositorio:
     
     def listar(self):
         """
-        Lista todas las ventas con fecha_hora formateada
+        Lista todas las ventas con todos los campos incluyendo multimoneda
         """
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT v.idventa, 
-                   CONVERT(varchar, v.fecha_hora, 103) + ' ' + CONVERT(varchar, v.fecha_hora, 108) as fecha,
-                   v.fecha_hora,
-                   v.tipo_comprobante, 
-                   v.serie, 
-                   v.numero_comprobante, 
-                   v.igv, 
-                   v.estado,
-                   ISNULL(c.nombre + ' ' + c.apellidos, 'CONSUMIDOR FINAL') as cliente,
-                   t.nombre + ' ' + t.apellidos as trabajador
+            SELECT 
+                v.idventa, 
+                CONVERT(varchar, v.fecha_hora, 103) + ' ' + CONVERT(varchar, v.fecha_hora, 108) as fecha,
+                v.fecha_hora,
+                v.tipo_comprobante, 
+                v.serie, 
+                v.numero_comprobante, 
+                v.igv, 
+                v.estado,
+                v.moneda,
+                v.tasa_cambio,
+                v.monto_bs,
+                v.monto_divisa,
+                ISNULL(c.nombre + ' ' + c.apellidos, 'CONSUMIDOR FINAL') as cliente,
+                t.nombre + ' ' + t.apellidos as trabajador
             FROM venta v
             LEFT JOIN cliente c ON v.idcliente = c.idcliente
             LEFT JOIN trabajador t ON v.idtrabajador = t.idtrabajador
@@ -39,10 +44,7 @@ class VentaRepositorio:
             """
             cursor.execute(query)
             
-            # Obtener los nombres de las columnas
             columns = [column[0] for column in cursor.description]
-            
-            # Convertir las filas a diccionarios
             rows = cursor.fetchall()
             result = []
             for row in rows:
@@ -71,8 +73,15 @@ class VentaRepositorio:
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT v.idventa, v.fecha, v.tipo_comprobante, 
+            SELECT v.idventa, 
+                   CONVERT(varchar, v.fecha_hora, 103) + ' ' + CONVERT(varchar, v.fecha_hora, 108) as fecha,
+                   v.fecha_hora,
+                   v.tipo_comprobante, 
                    v.serie, v.numero_comprobante, v.igv, v.estado,
+                   v.moneda,
+                   v.tasa_cambio,
+                   v.monto_bs,
+                   v.monto_divisa,
                    c.nombre + ' ' + c.apellidos as cliente,
                    c.idcliente,
                    t.nombre + ' ' + t.apellidos as trabajador,
@@ -88,7 +97,10 @@ class VentaRepositorio:
             row = cursor.fetchone()
             
             if row:
-                return dict(zip(columns, row))
+                row_dict = {}
+                for i, col in enumerate(columns):
+                    row_dict[col] = row[i]
+                return row_dict
             return None
             
         except Exception as e:
@@ -142,15 +154,6 @@ class VentaRepositorio:
     def agregar_detalle(self, idventa, idarticulo, cantidad, precio_venta):
         """
         Agrega un detalle a una venta
-        
-        Args:
-            idventa (int): ID de la venta
-            idarticulo (int): ID del artículo
-            cantidad (int): Cantidad vendida
-            precio_venta (float): Precio unitario
-            
-        Returns:
-            int or None: ID del detalle creado o None si hay error
         """
         try:
             cursor = self.conn.cursor()
@@ -166,7 +169,6 @@ class VentaRepositorio:
             
             row = cursor.fetchone()
             iddetalle = row[0] if row else None
-            
             self.conn.commit()
             
             logger.info(f"✅ Detalle de venta agregado: {cantidad} x {precio_venta}")
@@ -180,12 +182,6 @@ class VentaRepositorio:
     def obtener_detalles(self, idventa):
         """
         Obtiene los detalles de una venta
-        
-        Args:
-            idventa (int): ID de la venta
-            
-        Returns:
-            list: Lista de detalles
         """
         try:
             cursor = self.conn.cursor()
@@ -200,7 +196,12 @@ class VentaRepositorio:
             
             columns = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
-            result = [dict(zip(columns, row)) for row in rows]
+            result = []
+            for row in rows:
+                row_dict = {}
+                for i, col in enumerate(columns):
+                    row_dict[col] = row[i]
+                result.append(row_dict)
             
             return result
             
@@ -211,12 +212,6 @@ class VentaRepositorio:
     def anular(self, idventa):
         """
         Anula una venta (cambia estado a ANULADO)
-        
-        Args:
-            idventa (int): ID de la venta a anular
-            
-        Returns:
-            bool: True si se anuló correctamente
         """
         try:
             cursor = self.conn.cursor()
@@ -237,28 +232,27 @@ class VentaRepositorio:
     def ventas_por_cliente(self, idcliente):
         """
         Obtiene todas las ventas de un cliente
-        
-        Args:
-            idcliente (int): ID del cliente
-            
-        Returns:
-            list: Lista de ventas
         """
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT v.idventa, v.fecha, v.tipo_comprobante, 
+            SELECT v.idventa, v.fecha_hora, v.tipo_comprobante, 
                    v.serie, v.numero_comprobante, v.igv, v.estado,
-                   v.idcliente
+                   v.moneda, v.monto_bs, v.monto_divisa
             FROM venta v
             WHERE v.idcliente = ?
-            ORDER BY v.fecha DESC
+            ORDER BY v.fecha_hora DESC
             """
             cursor.execute(query, (idcliente,))
             
             columns = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
-            result = [dict(zip(columns, row)) for row in rows]
+            result = []
+            for row in rows:
+                row_dict = {}
+                for i, col in enumerate(columns):
+                    row_dict[col] = row[i]
+                result.append(row_dict)
             
             return result
             
@@ -269,32 +263,41 @@ class VentaRepositorio:
     def ventas_por_fecha(self, fecha_inicio, fecha_fin):
         """
         Obtiene ventas en un rango de fechas
-        
-        Args:
-            fecha_inicio: Fecha inicial
-            fecha_fin: Fecha final
-            
-        Returns:
-            list: Lista de ventas
         """
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT v.idventa, v.fecha, v.tipo_comprobante, 
-                   v.serie, v.numero_comprobante, v.igv, v.estado,
-                   c.nombre + ' ' + c.apellidos as cliente,
-                   t.nombre + ' ' + t.apellidos as trabajador
+            SELECT 
+                v.idventa, 
+                CONVERT(varchar, v.fecha_hora, 103) + ' ' + CONVERT(varchar, v.fecha_hora, 108) as fecha,
+                v.fecha_hora,
+                v.tipo_comprobante, 
+                v.serie, 
+                v.numero_comprobante, 
+                v.igv, 
+                v.estado,
+                v.moneda,
+                v.tasa_cambio,
+                v.monto_bs,
+                v.monto_divisa,
+                ISNULL(c.nombre + ' ' + c.apellidos, 'CONSUMIDOR FINAL') as cliente,
+                t.nombre + ' ' + t.apellidos as trabajador
             FROM venta v
             LEFT JOIN cliente c ON v.idcliente = c.idcliente
             LEFT JOIN trabajador t ON v.idtrabajador = t.idtrabajador
-            WHERE CAST(v.fecha AS DATE) BETWEEN ? AND ?
-            ORDER BY v.fecha DESC
+            WHERE CAST(v.fecha_hora AS DATE) BETWEEN ? AND ?
+            ORDER BY v.fecha_hora DESC
             """
             cursor.execute(query, (fecha_inicio, fecha_fin))
             
             columns = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
-            result = [dict(zip(columns, row)) for row in rows]
+            result = []
+            for row in rows:
+                row_dict = {}
+                for i, col in enumerate(columns):
+                    row_dict[col] = row[i]
+                result.append(row_dict)
             
             return result
             

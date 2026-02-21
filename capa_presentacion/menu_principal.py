@@ -38,6 +38,7 @@ from capa_negocio.validacion_venezuela import ValidacionVenezuela
 from capa_negocio.inventario_service import InventarioService
 from capa_negocio.ingreso_service import IngresoService
 from capa_negocio.proveedor_archivo_service import ProveedorArchivoService
+from capa_negocio.reporte_contable_service import ReporteContableService
 
 # Importaciones para SENIAT y auditoría
 from capa_datos.auditoria_repo import AuditoriaRepositorio
@@ -104,8 +105,11 @@ class SistemaVentas:
         rol_repo = RolRepositorio(self.conn)
         usuario_admin_repo = UsuarioAdminRepositorio(self.conn)
         proveedor_archivo_repo = ProveedorArchivoRepositorio(self.conn)
-        tasa_repo = TasaRepositorio(self.conn)    
-    
+        
+        # Inicializar repositorio de tasas
+        from capa_datos.tasa_repo import TasaRepositorio
+        tasa_repo = TasaRepositorio(self.conn)
+        
         # Inicializar servicios base
         self.trabajador_service = TrabajadorService(trabajador_repo)
         self.categoria_service = CategoriaService(categoria_repo)
@@ -114,10 +118,11 @@ class SistemaVentas:
         self.proveedor_service = ProveedorService(proveedor_repo)
         self.proveedor_archivo_service = ProveedorArchivoService(proveedor_archivo_repo, self.proveedor_service)
         
-        # IMPORTANTE: Orden correcto de inicialización
+        # Inicializar inventario
         self.inventario_service = InventarioService(self.articulo_service)
         logger.info("✅ InventarioService inicializado")
         
+        # Inicializar venta con soporte de tasas
         self.venta_service = VentaService(
             venta_repo, 
             self.cliente_service, 
@@ -125,7 +130,7 @@ class SistemaVentas:
             self.inventario_service,
             tasa_repo=tasa_repo
         )
-        logger.info("✅ VentaService inicializado")
+        logger.info("✅ VentaService inicializado con soporte de tasas")
         
         self.ingreso_service = IngresoService(
             ingreso_repo, 
@@ -146,9 +151,20 @@ class SistemaVentas:
             password="fhnh tiax mfus fmok"
         )
         
+        # Inicializar servicio de auditoría
+        from capa_datos.auditoria_repo import AuditoriaRepositorio
+        from capa_negocio.auditoria_service import AuditoriaService
         auditoria_repo = AuditoriaRepositorio(self.conn)
         self.auditoria_service = AuditoriaService(auditoria_repo)
         logger.info("✅ Servicio de auditoría inicializado")
+        
+        # Inicializar servicio de reportes contables
+        from capa_negocio.reporte_contable_service import ReporteContableService
+        self.reporte_service = ReporteContableService(
+            self.venta_service,
+            self.inventario_service
+        )
+        logger.info("✅ ReporteContableService inicializado")
         
         return True
     
@@ -321,7 +337,7 @@ class SistemaVentas:
         if not usuario or self.rol_service.tiene_permiso('inventario_ver'):
             opciones.append(("5", "Gestión de Inventario", "📊"))
         if not usuario or self.rol_service.tiene_permiso('reportes_ventas'):
-            opciones.append(("6", "Reportes", "📈"))
+            opciones.append(("6", "Reportes Contables", "📈"))
         if usuario and self.rol_service.tiene_permiso('usuarios_ver'):
             opciones.append(("7", "Administración de Usuarios", "👤"))
         
@@ -1540,11 +1556,12 @@ class SistemaVentas:
         while True:
             self.mostrar_cabecera("GESTIÓN DE ARTÍCULOS")
             print("1. Listar artículos")
-            print("2. Buscar artículo")
+            print("2. Buscar artículo (por código/nombre)")
             print("3. Crear artículo")
             print("4. Editar artículo")
             print("5. Eliminar artículo")
             print("6. Ver stock por lote")
+            print("7. 🔍 Búsqueda avanzada (código barras/PLU)")
             print("0. Volver")
             print()
             
@@ -1562,6 +1579,8 @@ class SistemaVentas:
                 self._eliminar_articulo()
             elif opcion == '6':
                 self._ver_stock_lotes()
+            elif opcion == '7':
+                self._buscar_articulo_gestion()
             elif opcion == '0':
                 break
             else:
@@ -1935,7 +1954,7 @@ class SistemaVentas:
     
     @requiere_permiso('ventas_crear')
     def _registrar_venta(self):
-        """Registra una nueva venta con multimoneda y atajos de teclado"""
+        """Registra una nueva venta con multimoneda y búsqueda avanzada"""
         self.mostrar_cabecera("REGISTRAR VENTA - MULTIMONEDA")
         
         # Obtener usuario actual
@@ -1953,19 +1972,18 @@ class SistemaVentas:
         print(f"\n{self.COLOR_AMARILLO}⚡ ATAJOS DE TECLADO:{self.COLOR_RESET}")
         
         if sistema == "Windows":
-            # En Windows, las teclas F sí funcionan
             print(f"  {self.COLOR_VERDE}[F8]{self.COLOR_RESET}  → Consumidor Final (DIRECTO)")
             print(f"  {self.COLOR_VERDE}[F9]{self.COLOR_RESET}  → Buscar por Cédula")
             print(f"  {self.COLOR_VERDE}[F10]{self.COLOR_RESET} → Buscar por RIF")
             print(f"  {self.COLOR_VERDE}[F11]{self.COLOR_RESET} → Imprimir Factura")
             print(f"  {self.COLOR_VERDE}[ESC]{self.COLOR_RESET} → Menú normal")
         else:
-            # En Linux, usamos números para evitar conflicto
             print(f"  {self.COLOR_VERDE}[1]{self.COLOR_RESET} → Consumidor Final")
             print(f"  {self.COLOR_VERDE}[2]{self.COLOR_RESET} → Buscar por Cédula")
             print(f"  {self.COLOR_VERDE}[3]{self.COLOR_RESET} → Buscar por RIF")
             print(f"  {self.COLOR_VERDE}[4]{self.COLOR_RESET} → Imprimir Factura")
             print(f"  {self.COLOR_VERDE}[0]{self.COLOR_RESET} → Menú normal")
+            print(f"  {self.COLOR_VERDE}[ESC]{self.COLOR_RESET} → También menú normal")
         
         print("\nPresione una tecla o use los atajos...")
         
@@ -1976,56 +1994,43 @@ class SistemaVentas:
             print(f"Tecla detectada: '{key}' - Sistema: {sistema}")
             
             if sistema == "Windows":
-                # Atajos para Windows (teclas F)
                 if key == readchar.key.F8:
                     print(f"\n{self.COLOR_VERDE}✅ Atajo F8: Consumidor Final{self.COLOR_RESET}")
                     return self._continuar_venta_consumidor_final(usuario)
-                
                 elif key == readchar.key.F9:
                     print(f"\n{self.COLOR_VERDE}✅ Atajo F9: Búsqueda por Cédula{self.COLOR_RESET}")
                     return self._buscar_por_cedula_rapido(usuario)
-                
                 elif key == readchar.key.F10:
                     print(f"\n{self.COLOR_VERDE}✅ Atajo F10: Búsqueda por RIF{self.COLOR_RESET}")
                     return self._buscar_por_rif_rapido(usuario)
-                
                 elif key == readchar.key.F11:
                     print(f"\n{self.COLOR_VERDE}✅ Atajo F11: Imprimir Factura{self.COLOR_RESET}")
                     return self._imprimir_factura_rapido(usuario)
-                
                 elif key == readchar.key.ESC:
                     print(f"\n{self.COLOR_AMARILLO}⏎ ESC detectado - Continuando con menú normal{self.COLOR_RESET}")
                     opcion_ident = None
-                
                 else:
                     print(f"\n{self.COLOR_AMARILLO}⏎ Tecla no es atajo - Continuando con menú normal{self.COLOR_RESET}")
                     opcion_ident = None
             else:
-                # Atajos para Linux (números)
                 if key == '1':
                     print(f"\n{self.COLOR_VERDE}✅ Atajo 1: Consumidor Final{self.COLOR_RESET}")
                     return self._continuar_venta_consumidor_final(usuario)
-                
                 elif key == '2':
                     print(f"\n{self.COLOR_VERDE}✅ Atajo 2: Búsqueda por Cédula{self.COLOR_RESET}")
                     return self._buscar_por_cedula_rapido(usuario)
-                
                 elif key == '3':
                     print(f"\n{self.COLOR_VERDE}✅ Atajo 3: Búsqueda por RIF{self.COLOR_RESET}")
                     return self._buscar_por_rif_rapido(usuario)
-                
                 elif key == '4':
                     print(f"\n{self.COLOR_VERDE}✅ Atajo 4: Imprimir Factura{self.COLOR_RESET}")
                     return self._imprimir_factura_rapido(usuario)
-                
                 elif key == '0':
                     print(f"\n{self.COLOR_AMARILLO}⏎ Atajo 0 - Continuando con menú normal{self.COLOR_RESET}")
                     opcion_ident = None
-                
                 elif key == readchar.key.ESC:
                     print(f"\n{self.COLOR_AMARILLO}⏎ ESC detectado - Continuando con menú normal{self.COLOR_RESET}")
                     opcion_ident = None
-                
                 else:
                     print(f"\n{self.COLOR_AMARILLO}⏎ Tecla '{key}' no es atajo - Continuando con menú normal{self.COLOR_RESET}")
                     opcion_ident = None
@@ -2129,8 +2134,253 @@ class SistemaVentas:
             print("✅ Venta sin identificación de cliente")
             idcliente = None
         
-        # Continuar con el flujo normal de venta
-        return self._continuar_flujo_venta(usuario, idcliente, cliente, opcion_ident)
+        # ===== SELECCIÓN DE MONEDA =====
+        print("\n" + "="*60)
+        print("💰 SELECCIÓN DE MONEDA")
+        print("="*60)
+        print("1. 🇻🇪 Bolívares (VES)")
+        print("2. 🇺🇸 Dólares (USD)")
+        print("3. 🇪🇺 Euros (EUR)")
+        opcion_moneda = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de la factura: {self.COLOR_RESET}").strip()
+        
+        moneda_map = {'1': 'VES', '2': 'USD', '3': 'EUR'}
+        moneda = moneda_map.get(opcion_moneda, 'VES')
+        
+        # Mostrar tasa actual si es USD
+        if moneda == 'USD':
+            if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
+                tasa = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
+                if tasa:
+                    print(f"\n{self.COLOR_VERDE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
+                else:
+                    print(f"\n{self.COLOR_AMARILLO}⚠️ No hay tasa registrada. Se solicitará al momento de la venta.{self.COLOR_RESET}")
+        
+        # ===== MONEDA DE PAGO =====
+        print("\n" + "="*60)
+        print("💳 MONEDA DE PAGO")
+        print("="*60)
+        print("1. Misma moneda de la factura")
+        print("2. Dólares (USD)")
+        print("3. Bolívares (VES)")
+        opcion_pago = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de pago: {self.COLOR_RESET}").strip()
+        
+        moneda_pago_map = {'1': moneda, '2': 'USD', '3': 'VES'}
+        moneda_pago = moneda_pago_map.get(opcion_pago, moneda)
+        
+        # ===== DATOS DEL COMPROBANTE =====
+        print("\n" + "="*60)
+        print("📄 DATOS DEL COMPROBANTE")
+        print("="*60)
+        
+        if opcion_ident == '1':
+            print("Tipo de comprobante:")
+            print("  1. Factura (con RIF)")
+            tipo_op = '1'
+            tipo_comprobante = 'FACTURA'
+        elif opcion_ident == '2':
+            print("Tipo de comprobante:")
+            print("  1. Factura (con Cédula)")
+            print("  2. Boleta (consumo)")
+            tipo_op = input(f"{self.COLOR_AMARILLO}Seleccione: {self.COLOR_RESET}").strip()
+            tipo_comprobante = 'FACTURA' if tipo_op == '1' else 'BOLETA'
+        else:
+            print("Tipo de comprobante:")
+            print("  1. Boleta (consumo final)")
+            print("  2. Ticket (consumo final)")
+            tipo_map = {'1': 'BOLETA', '2': 'TICKET'}
+            tipo_op = input(f"{self.COLOR_AMARILLO}Seleccione: {self.COLOR_RESET}").strip()
+            tipo_comprobante = tipo_map.get(tipo_op, 'BOLETA')
+        
+        serie = input("Serie (ej. F001): ")
+        numero = input("Número: ")
+        
+        # ===== AGREGAR PRODUCTOS (VERSIÓN MEJORADA) =====
+        detalle = []
+        print("\n" + "="*50)
+        print("🛒 AGREGAR PRODUCTOS")
+        print("="*50)
+        print(f"{self.COLOR_VERDE}💡 Use '?' para ver lista, '*' para búsqueda avanzada{self.COLOR_RESET}")
+        
+        while True:
+            print("\n--- Agregar producto ---")
+            entrada = input("Código/PLU (0=terminar, ?=lista, *=búsqueda): ").lower()
+            
+            if entrada == '0':
+                break
+            
+            elif entrada == '?':
+                self._mostrar_lista_articulos()
+                continue
+            
+            elif entrada == '*':
+                # Búsqueda avanzada
+                art = self._buscar_articulo_para_venta()
+                if not art:
+                    continue
+            else:
+                # Buscar por código normal o código de barras
+                art = self.articulo_service.buscar_por_codigo(entrada)
+                if not art:
+                    art = self.articulo_service.buscar_por_codigo_barras(entrada)
+            
+            if not art:
+                print(f"{self.COLOR_ROJO}❌ Artículo no encontrado. Use '*' para búsqueda avanzada{self.COLOR_RESET}")
+                continue
+            
+            # Inicializar variables
+            cantidad = 1
+            precio = 0
+            
+            # Si es producto pesado, ya viene con precio calculado
+            if 'precio_calculado' in art:
+                precio = art['precio_calculado']
+                cantidad = art.get('cantidad', 1)
+                print(f"📌 Artículo: {art['nombre']} - {cantidad:.3f} kg - Precio: {precio:.2f}")
+            else:
+                # Producto normal, pedir cantidad
+                stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
+                print(f"📌 Artículo: {art['nombre']} - Stock disponible: {stock} unidades")
+                
+                try:
+                    tipo_medida = art.get('tipo_medida', 'UNIDAD')
+                    if tipo_medida == 'PESO':
+                        cantidad = float(input("Cantidad (kg): "))
+                        unidad = 'kg'
+                    else:
+                        cantidad = int(input("Cantidad (unidades): "))
+                        unidad = 'und'
+                    
+                    if unidad == 'und' and cantidad > stock:
+                        print(f"❌ Stock insuficiente. Solo hay {stock} unidades")
+                        continue
+                    
+                    precio = float(input("Precio unitario: "))
+                except:
+                    print("❌ Cantidad o precio inválido")
+                    continue
+            
+            detalle.append({
+                'idarticulo': art['idarticulo'],
+                'cantidad': cantidad,
+                'precio_venta': precio
+            })
+            print(f"✅ {art['nombre']} agregado")
+        
+        if not detalle:
+            print("❌ Debe agregar al menos un producto")
+            self.pausa()
+            return
+        
+        # ===== RESUMEN DE VENTA =====
+        print("\n" + "="*50)
+        print("📋 RESUMEN DE VENTA")
+        print("="*50)
+        
+        if opcion_ident == '1' and cliente:
+            print(f"Tipo: FACTURA CON RIF")
+            print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
+            print(f"RIF: {cliente['tipo_documento']}-{cliente['num_documento']}")
+        elif opcion_ident == '2' and cliente:
+            print(f"Tipo: FACTURA CON CÉDULA")
+            print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
+            print(f"Cédula: {cliente['tipo_documento']}-{cliente['num_documento']}")
+        else:
+            print(f"Tipo: {tipo_comprobante} - CONSUMIDOR FINAL")
+            print("Cliente: No identificado")
+            print(f"ℹ️ {MENSAJES_LEGALES['consumidor_final']}")
+        
+        print(f"Moneda factura: {moneda}")
+        print(f"Moneda pago: {moneda_pago}")
+        print(f"Comprobante: {tipo_comprobante} {serie}-{numero}")
+        print("\nProductos:")
+        
+        total = 0
+        for item in detalle:
+            art = self.articulo_service.obtener_por_id(item['idarticulo'])
+            subtotal = item['cantidad'] * item['precio_venta']
+            total += subtotal
+            if 'cantidad' in item and isinstance(item['cantidad'], float):
+                print(f"  - {art['nombre']}: {item['cantidad']:.3f} kg x {item['precio_venta']:.2f} = {subtotal:.2f}")
+            else:
+                print(f"  - {art['nombre']}: {item['cantidad']} x {item['precio_venta']:.2f} = {subtotal:.2f}")
+        
+        iva_total = total * 0.16
+        total_con_iva = total + iva_total
+        
+        print(f"\n💰 SUBTOTAL: Bs. {total:.2f}")
+        print(f"💰 IVA (16%): Bs. {iva_total:.2f}")
+        
+        if moneda == 'USD':
+            print(f"💰 TOTAL: ${total_con_iva:.2f} USD")
+        elif moneda == 'EUR':
+            print(f"💰 TOTAL: €{total_con_iva:.2f} EUR")
+        else:
+            print(f"💰 TOTAL: Bs. {total_con_iva:.2f}")
+        
+        print("="*50)
+        
+        confirmar = input(f"{self.COLOR_AMARILLO}¿Confirmar venta? (s/N): {self.COLOR_RESET}").lower()
+        if confirmar != 's':
+            print("Operación cancelada")
+            self.pausa()
+            return
+        
+        # ===== REGISTRAR VENTA =====
+        idventa = self.venta_service.registrar(
+            usuario['idtrabajador'], 
+            idcliente,
+            tipo_comprobante,
+            serie, 
+            numero, 
+            16.0,
+            detalle,
+            moneda=moneda,
+            moneda_pago=moneda_pago
+        )
+        
+        if idventa:
+            print(f"\n{self.COLOR_VERDE}✅ Venta #{idventa} registrada correctamente{self.COLOR_RESET}")
+            print("="*50)
+            print("🎫 DATOS DE LA FACTURA:")
+            print(f"   Número: {tipo_comprobante} {serie}-{numero}")
+            
+            if opcion_ident == '1' and cliente:
+                print(f"   Cliente: {cliente['nombre']} {cliente['apellidos']}")
+                print(f"   RIF: {cliente['tipo_documento']}-{cliente['num_documento']}")
+            elif opcion_ident == '2' and cliente:
+                print(f"   Cliente: {cliente['nombre']} {cliente['apellidos']}")
+                print(f"   Cédula: {cliente['tipo_documento']}-{cliente['num_documento']}")
+            else:
+                print("   Cliente: CONSUMIDOR FINAL")
+                print("   Identificación: No aplica")
+            
+            if moneda == 'USD':
+                print(f"   Total: ${total_con_iva:.2f} USD")
+            elif moneda == 'EUR':
+                print(f"   Total: €{total_con_iva:.2f} EUR")
+            else:
+                print(f"   Total: Bs. {total_con_iva:.2f}")
+            
+            print(f"   Moneda pago: {moneda_pago}")
+            print(f"   {MENSAJES_LEGALES['factura_digital']}")
+            print("="*50)
+            
+            # Preguntar si desea imprimir factura
+            imprimir = input(f"\n{self.COLOR_AMARILLO}¿Desea imprimir la factura? (s/N): {self.COLOR_RESET}").lower()
+            if imprimir == 's':
+                self._imprimir_factura(idventa)
+            
+            tipo_cliente = "CONSUMIDOR FINAL" if not idcliente else "CLIENTE IDENTIFICADO"
+            self.registrar_auditoria(
+                accion="CREAR",
+                tabla="venta",
+                registro_id=idventa,
+                datos_nuevos=f"Venta #{idventa} - {tipo_cliente} - Total: {total_con_iva:.2f} {moneda}"
+            )
+        else:
+            print(f"\n{self.COLOR_ROJO}❌ Error al registrar la venta{self.COLOR_RESET}")
+        
+        self.pausa()
 
     def _continuar_flujo_venta(self, usuario, idcliente, cliente, opcion_ident):
         """Continuación del flujo de venta después de seleccionar cliente"""
@@ -2152,7 +2402,7 @@ class SistemaVentas:
             if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
                 tasa = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
                 if tasa:
-                    print(f"\n{self.COLOR_VERGE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
+                    print(f"\n{self.COLOR_VERDE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
                 else:
                     print(f"\n{self.COLOR_AMARILLO}⚠️ No hay tasa registrada. Se solicitará al momento de la venta.{self.COLOR_RESET}")
         
@@ -2298,6 +2548,10 @@ class SistemaVentas:
             print("Operación cancelada")
             self.pausa()
             return
+
+        # DEBUG - Verificar valor de moneda
+        print(f"🔍 DEBUG - Valor de moneda antes de registrar: {moneda}")
+        print(f"🔍 DEBUG - Valor de moneda_pago: {moneda_pago}")
         
         # ===== REGISTRAR VENTA =====
         idventa = self.venta_service.registrar(
@@ -2535,10 +2789,183 @@ class SistemaVentas:
         for a in articulos:
             stock = self.inventario_service.obtener_stock_articulo(a['idarticulo'])
             print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {stock} und")
+
+    # ======================================================
+    # NUEVOS MÉTODOS DE BÚSQUEDA PARA VENTAS
+    # ======================================================
+    
+    def _buscar_articulo_para_venta(self):
+        """
+        NUEVO: Menú de búsqueda de artículos durante la venta
+        """
+        self.mostrar_cabecera("🔍 BUSCAR ARTÍCULO")
+        
+        print("Opciones de búsqueda:")
+        print("1. 🔎 Escanear código de barras")
+        print("2. ⌨️ Ingresar código manualmente")
+        print("3. 📝 Buscar por nombre")
+        print("4. ↩️ Volver")
+        
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion == '1':
+            codigo = input("Escanee el código de barras: ").strip()
+            return self._buscar_articulo_por_codigo(codigo)
+        
+        elif opcion == '2':
+            codigo = input("Ingrese código manual: ").strip()
+            return self._buscar_articulo_por_codigo(codigo)
+        
+        elif opcion == '3':
+            termino = input("Ingrese nombre del artículo: ").strip()
+            return self._buscar_articulo_por_nombre(termino)
+        
+        else:
+            return None
+    
+    def _buscar_articulo_por_codigo(self, codigo):
+        """
+        NUEVO: Busca artículo por código de barras (con soporte para balanza)
+        """
+        # Intentar buscar por código de barras exacto
+        articulo = self.articulo_service.buscar_por_codigo_barras(codigo)
+        
+        if articulo:
+            return articulo
+        
+        # Si no encuentra, verificar si es código de balanza (prefijo 21)
+        if codigo.startswith('21') and len(codigo) == 13:
+            return self._procesar_codigo_balanza(codigo)
+        
+        print(f"{self.COLOR_ROJO}❌ Artículo no encontrado{self.COLOR_RESET}")
+        return None
+    
+    def _procesar_codigo_balanza(self, codigo):
+        """
+        NUEVO: Procesa códigos de balanza (prefijo 21)
+        """
+        try:
+            # Extraer PLU (posiciones 3-7)
+            plu = codigo[2:7].lstrip('0') or '0'
+            
+            # Extraer peso (posiciones 8-12) convertido a kg
+            peso_gramos = int(codigo[7:12])
+            peso_kg = peso_gramos / 1000
+            
+            # Buscar artículo por PLU
+            articulo = self.articulo_service.buscar_por_plu(plu)
+            
+            if articulo:
+                # Crear una copia del artículo con datos calculados
+                resultado = articulo.copy()
+                
+                if articulo.get('es_pesado'):
+                    precio_calculado = articulo.get('precio_por_kilo', 0) * peso_kg
+                    resultado['precio_venta'] = precio_calculado
+                    resultado['cantidad'] = peso_kg
+                    resultado['unidad'] = 'kg'
+                    print(f"✅ {articulo['nombre']} - {peso_kg:.3f} kg")
+                
+                return resultado
+            
+        except Exception as e:
+            logger.error(f"Error procesando código de balanza: {e}")
+        
+        return None
+    
+    def _buscar_articulo_por_nombre(self, termino):
+        """
+        NUEVO: Busca artículos por nombre y muestra lista para seleccionar
+        """
+        resultados = self.articulo_service.buscar_por_nombre(termino)
+        
+        if not resultados:
+            print(f"{self.COLOR_ROJO}❌ No se encontraron artículos{self.COLOR_RESET}")
+            return None
+        
+        print(f"\n{self.COLOR_VERDE}📋 RESULTADOS ({len(resultados)}):{self.COLOR_RESET}")
+        print(f"{'#':<3} {'CÓDIGO':<15} {'NOMBRE':<50} {'PRECIO':<10}")
+        print("-" * 78)
+        
+        for i, art in enumerate(resultados, 1):
+            precio = art.get('precio_venta', 0)
+            print(f"{i:<3} {art['codigo']:<15} {art['nombre']:<50} {precio:>10.2f}")
+        
+        try:
+            seleccion = input(f"\n{self.COLOR_AMARILLO}Seleccione número (Enter para cancelar): {self.COLOR_RESET}").strip()
+            if seleccion:
+                idx = int(seleccion) - 1
+                if 0 <= idx < len(resultados):
+                    return resultados[idx]
+        except:
+            pass
+        
+        return None
+
+    # ======================================================
+    # NUEVOS MÉTODOS DE BÚSQUEDA PARA GESTIÓN DE ARTÍCULOS
+    # ======================================================
+    
+    def _buscar_articulo_gestion(self):
+        """
+        NUEVO: Busca artículos en gestión (por código o nombre)
+        """
+        self.mostrar_cabecera("🔍 BUSCAR ARTÍCULO")
+        
+        print("Buscar por:")
+        print("1. 📦 Código de barras")
+        print("2. 📝 Nombre")
+        print("3. 🔢 Código interno (PLU)")
+        print("4. ↩️ Volver")
+        
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion == '1':
+            codigo = input("Ingrese código de barras: ").strip()
+            self._mostrar_resultado_busqueda(codigo, 'codigo')
+        
+        elif opcion == '2':
+            termino = input("Ingrese nombre: ").strip()
+            self._mostrar_resultado_busqueda(termino, 'nombre')
+        
+        elif opcion == '3':
+            plu = input("Ingrese PLU: ").strip()
+            self._mostrar_resultado_busqueda(plu, 'plu')
+        
+        self.pausa()
+    
+    def _mostrar_resultado_busqueda(self, valor, tipo):
+        """
+        NUEVO: Muestra resultados de búsqueda según el tipo
+        """
+        if tipo == 'codigo':
+            articulo = self.articulo_service.buscar_por_codigo_barras(valor)
+            if articulo:
+                self._mostrar_detalle_articulo(articulo)
+            else:
+                print(f"{self.COLOR_ROJO}❌ Artículo no encontrado{self.COLOR_RESET}")
+        
+        elif tipo == 'plu':
+            articulo = self.articulo_service.buscar_por_plu(valor)
+            if articulo:
+                self._mostrar_detalle_articulo(articulo)
+            else:
+                print(f"{self.COLOR_ROJO}❌ Artículo con PLU {valor} no encontrado{self.COLOR_RESET}")
+        
+        elif tipo == 'nombre':
+            resultados = self.articulo_service.buscar_por_nombre(valor)
+            if resultados:
+                print(f"\n{self.COLOR_VERDE}📋 RESULTADOS ({len(resultados)}):{self.COLOR_RESET}")
+                print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<50} {'PRECIO':<10}")
+                print("-" * 80)
+                for art in resultados:
+                    print(f"{art['idarticulo']:<5} {art['codigo']:<15} {art['nombre']:<50} {art.get('precio_venta', 0):>10.2f}")
+            else:
+                print(f"{self.COLOR_ROJO}❌ No se encontraron artículos{self.COLOR_RESET}")
     
     @requiere_permiso('ventas_ver')
     def _listar_ventas(self):
-        """Lista todas las ventas con fecha y hora"""
+        """Lista todas las ventas con fecha, hora y montos"""
         self.mostrar_cabecera("LISTADO DE VENTAS")
         
         ventas = self.venta_service.listar()
@@ -2546,24 +2973,52 @@ class SistemaVentas:
         if not ventas:
             print("📭 No hay ventas registradas")
         else:
-            print(f"{'ID':<5} {'FECHA Y HORA':<19} {'COMPROBANTE':<20} {'CLIENTE':<25} {'ESTADO':<10}")
-            print("-" * 79)
+            # Cabecera con columna de MONTO
+            print(f"{'ID':<5} {'FECHA Y HORA':<19} {'COMPROBANTE':<20} {'CLIENTE':<20} {'MONTO':<15} {'ESTADO':<10}")
+            print("-" * 89)
+            
             for v in ventas:
                 comp = f"{v['tipo_comprobante']} {v['serie']}-{v['numero_comprobante']}"
                 
-                # CORREGIDO: Manejar cliente_nombre cuando es None
+                # Manejar cliente
                 cliente_nombre = v.get('cliente')
                 if cliente_nombre is None:
                     cliente_nombre = 'CONSUMIDOR FINAL'
                 
-                # Truncar si es muy largo
-                if len(cliente_nombre) > 25:
-                    cliente_nombre = cliente_nombre[:22] + "..."
-                    
-                print(f"{v['idventa']:<5} {v['fecha']:<19} {comp:<20} {cliente_nombre:<25} {v['estado']:<10}")
+                # Truncar cliente si es muy largo
+                if len(cliente_nombre) > 20:
+                    cliente_nombre = cliente_nombre[:17] + "..."
+                
+                # Determinar monto y moneda
+                moneda = v.get('moneda', 'VES')
+                
+                if moneda == 'USD':
+                    monto = v.get('monto_divisa', 0)
+                    if monto:
+                        monto_str = f"${monto:,.2f}"
+                    else:
+                        monto_str = "$0.00"
+                elif moneda == 'EUR':
+                    monto = v.get('monto_divisa', 0)
+                    if monto:
+                        monto_str = f"€{monto:,.2f}"
+                    else:
+                        monto_str = "€0.00"
+                else:  # VES
+                    monto = v.get('monto_bs', v.get('total', 0))
+                    if monto:
+                        monto_str = f"Bs. {monto:,.2f}".replace(',', ' ')
+                    else:
+                        monto_str = "Bs. 0.00"
+                
+                # Truncar monto si es muy largo
+                if len(monto_str) > 15:
+                    monto_str = monto_str[:12] + "..."
+                
+                print(f"{v['idventa']:<5} {v['fecha']:<19} {comp:<20} {cliente_nombre:<20} {monto_str:<15} {v['estado']:<10}")
         
         self.pausa()
-    @requiere_permiso('ventas_ver')
+
     def _ver_venta(self):
         """Muestra detalle de una venta con hora exacta"""
         self.mostrar_cabecera("DETALLE DE VENTA")
@@ -3367,6 +3822,229 @@ class SistemaVentas:
             else:
                 print("❌ Opción no válida")
                 self.pausa()
+
+    @requiere_permiso('reportes_ventas')
+    def menu_reportes(self):
+        """Menú de reportes contables"""
+        while True:
+            self.mostrar_cabecera("📊 REPORTES CONTABLES")
+            
+            print("1. 📅 Reporte Diario")
+            print("2. 📆 Reporte Semanal")
+            print("3. 📆 Reporte Mensual")
+            print("4. 📆 Reporte Trimestral")
+            print("5. 📆 Reporte Anual")
+            print("6. 📥 Exportar a Excel/CSV")
+            print("0. Volver")
+            print()
+            
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+            
+            if opcion == '1':
+                self._reporte_diario()
+            elif opcion == '2':
+                self._reporte_semanal()
+            elif opcion == '3':
+                self._reporte_mensual()
+            elif opcion == '4':
+                self._reporte_trimestral()
+            elif opcion == '5':
+                self._reporte_anual()
+            elif opcion == '6':
+                self._exportar_reporte()
+            elif opcion == '0':
+                break
+            else:
+                print("❌ Opción no válida")
+                self.pausa()
+
+    def _reporte_diario(self):
+        """Muestra reporte de ventas del día"""
+        self.mostrar_cabecera("📅 REPORTE DIARIO")
+        
+        try:
+            datos = self.reporte_service.reporte_diario()
+            self._mostrar_reporte_contable(datos)
+        except Exception as e:
+            logger.error(f"Error generando reporte diario: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al generar reporte{self.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _reporte_semanal(self):
+        """Muestra reporte de ventas de la semana"""
+        self.mostrar_cabecera("📆 REPORTE SEMANAL")
+        
+        try:
+            datos = self.reporte_service.reporte_semanal()
+            self._mostrar_reporte_contable(datos)
+        except Exception as e:
+            logger.error(f"Error generando reporte semanal: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al generar reporte{self.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _reporte_mensual(self):
+        """Muestra reporte de ventas del mes"""
+        self.mostrar_cabecera("📆 REPORTE MENSUAL")
+        
+        try:
+            datos = self.reporte_service.reporte_mensual()
+            self._mostrar_reporte_contable(datos)
+        except Exception as e:
+            logger.error(f"Error generando reporte mensual: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al generar reporte{self.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _reporte_trimestral(self):
+        """Muestra reporte de ventas del trimestre"""
+        self.mostrar_cabecera("📆 REPORTE TRIMESTRAL")
+        
+        try:
+            datos = self.reporte_service.reporte_trimestral()
+            self._mostrar_reporte_contable(datos)
+        except Exception as e:
+            logger.error(f"Error generando reporte trimestral: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al generar reporte{self.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _reporte_anual(self):
+        """Muestra reporte de ventas del año"""
+        self.mostrar_cabecera("📆 REPORTE ANUAL")
+        
+        try:
+            datos = self.reporte_service.reporte_anual()
+            self._mostrar_reporte_contable(datos)
+        except Exception as e:
+            logger.error(f"Error generando reporte anual: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al generar reporte{self.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _mostrar_reporte_contable(self, datos):
+        """Muestra un reporte contable formateado"""
+        print(f"\n{self.COLOR_AZUL}📊 RESUMEN CONTABLE{self.COLOR_RESET}")
+        print("=" * 60)
+        print(f"Período: {datos['fecha_inicio']} al {datos['fecha_fin']}")
+        print(f"Total de ventas: {datos['total_ventas']}")
+        print("-" * 60)
+        print(f"{self.COLOR_VERDE}💰 Totales por moneda:{self.COLOR_RESET}")
+        print(f"   Bolívares (Bs.): {datos['total_bs']:,.2f}")
+        print(f"   Dólares (USD):   ${datos['total_usd']:,.2f}")
+        print(f"   Euros (EUR):     €{datos['total_eur']:,.2f}")
+        print(f"{self.COLOR_AMARILLO}📊 IGTF Total: Bs. {datos['igtf_total']:,.2f}{self.COLOR_RESET}")
+        print("-" * 60)
+        print(f"{self.COLOR_CYAN}📅 Detalle por día:{self.COLOR_RESET}")
+        print(f"{'Fecha':<12} {'Ventas':<8} {'Bs.':<15} {'USD':<12} {'EUR':<12}")
+        print("-" * 60)
+        
+        # Ordenar fechas cronológicamente
+        fechas_ordenadas = sorted(datos['detalle'].keys())
+        
+        for fecha in fechas_ordenadas:
+            det = datos['detalle'][fecha]
+            
+            # Formatear fecha de manera segura
+            try:
+                # Intentar formato YYYY-MM-DD
+                if '-' in fecha and len(fecha.split('-')) == 3:
+                    año, mes, dia = fecha.split('-')
+                    fecha_formateada = f"{dia}/{mes}/{año}"
+                else:
+                    # Si ya viene en otro formato, usarla directamente
+                    fecha_formateada = fecha
+            except:
+                fecha_formateada = fecha
+            
+            # Formatear números con separadores
+            try:
+                bs_str = f"{det['bs']:,.2f}".replace(',', ' ')
+            except:
+                bs_str = "0.00"
+            
+            try:
+                usd_str = f"{det['usd']:,.2f}".replace(',', ' ')
+            except:
+                usd_str = "0.00"
+            
+            try:
+                eur_str = f"{det['eur']:,.2f}".replace(',', ' ')
+            except:
+                eur_str = "0.00"
+            
+            # Imprimir línea con formato corregido
+            print(f"{fecha_formateada:<12} {det['ventas']:<8} {bs_str:>14} bs {usd_str:>10} $ {eur_str:>8} €")
+    
+    def _exportar_reporte(self):
+        """Exporta reporte a CSV"""
+        self.mostrar_cabecera("📥 EXPORTAR REPORTE")
+        
+        print("Seleccione período a exportar:")
+        print("1. Diario")
+        print("2. Semanal")
+        print("3. Mensual")
+        print("4. Trimestral")
+        print("5. Anual")
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion == '1':
+            datos = self.reporte_service.reporte_diario()
+        elif opcion == '2':
+            datos = self.reporte_service.reporte_semanal()
+        elif opcion == '3':
+            datos = self.reporte_service.reporte_mensual()
+        elif opcion == '4':
+            datos = self.reporte_service.reporte_trimestral()
+        elif opcion == '5':
+            datos = self.reporte_service.reporte_anual()
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
+        
+        try:
+            ruta = self.reporte_service.exportar_a_csv(datos)
+            print(f"\n{self.COLOR_VERDE}✅ Reporte exportado a: {ruta}{self.COLOR_RESET}")
+            print("   Puede abrirlo con Excel para análisis contable")
+        except Exception as e:
+            logger.error(f"Error exportando reporte: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al exportar reporte{self.COLOR_RESET}")
+        
+        self.pausa()
+    
+    def _exportar_reporte(self):
+        """Exporta reporte a CSV"""
+        self.mostrar_cabecera("📥 EXPORTAR REPORTE")
+        
+        print("Seleccione período a exportar:")
+        print("1. Diario")
+        print("2. Semanal")
+        print("3. Mensual")
+        print("4. Trimestral")
+        print("5. Anual")
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion == '1':
+            datos = self.reporte_service.reporte_diario()
+        elif opcion == '2':
+            datos = self.reporte_service.reporte_semanal()
+        elif opcion == '3':
+            datos = self.reporte_service.reporte_mensual()
+        elif opcion == '4':
+            datos = self.reporte_service.reporte_trimestral()
+        elif opcion == '5':
+            datos = self.reporte_service.reporte_anual()
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+            return
+        
+        ruta = self.reporte_service.exportar_a_csv(datos)
+        print(f"\n{self.COLOR_VERDE}✅ Reporte exportado a: {ruta}{self.COLOR_RESET}")
+        print("   Puede abrirlo con Excel para análisis contable")
+        self.pausa()
     
     def _ver_stock_completo(self):
         self.mostrar_cabecera("STOCK COMPLETO")
@@ -3633,10 +4311,10 @@ class SistemaVentas:
                     self.pausa()
             elif opcion == '6':
                 if self.rol_service.tiene_permiso('reportes_ventas'):
-                    print("🔧 Módulo de reportes en desarrollo")
+                    self.menu_reportes()
                 else:
                     print("❌ No tiene permisos para acceder a reportes")
-                self.pausa()
+                    self.pausa()
             elif opcion == '7':
                 if self.trabajador_service.get_usuario_actual() and self.rol_service.tiene_permiso('usuarios_ver'):
                     self.menu_administracion_usuarios()
