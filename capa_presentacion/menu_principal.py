@@ -1589,27 +1589,269 @@ class SistemaVentas:
     
     @requiere_permiso('articulos_ver')
     def _listar_articulos(self):
-        """Lista todos los artículos con su stock actual"""
-        self.mostrar_cabecera("LISTADO DE ARTÍCULOS")
-        
-        articulos_con_stock = self.inventario_service.listar_con_stock()
-        
-        if not articulos_con_stock:
-            print("📭 No hay artículos registrados")
-        else:
-            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'STOCK':<10} {'ESTADO':<10}")
-            print("-" * 90)
+        """Lista todos los artículos con opciones de edición"""
+        while True:
+            self.mostrar_cabecera("LISTADO DE ARTÍCULOS")
+            
+            articulos_con_stock = self.inventario_service.listar_con_stock()
+            
+            if not articulos_con_stock:
+                print("📭 No hay artículos registrados")
+                self.pausa()
+                return
+            
+            # Ordenar artículos por ID
+            articulos_con_stock.sort(key=lambda x: x['idarticulo'])
+            
+            # Cabecera con columnas
+            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'PRECIO $':<12} {'STOCK':<10} {'ESTADO':<10}")
+            print("-" * 107)
+            
             for a in articulos_con_stock:
+                precio = a.get('precio_venta', 0)
                 stock_str = f"{a['stock_actual']} und"
+                
+                # Formatear precio en dólares (enteros sin decimales, decimales con 2 dígitos)
+                if precio == int(precio):  # Si es entero (ej: 150.0 → 150)
+                    precio_str = f"${int(precio)}"
+                else:  # Si tiene decimales (ej: 0.60, 2.5, 4.50)
+                    # Mostrar con 2 decimales pero sin ceros innecesarios
+                    precio_str = f"${precio:.2f}".rstrip('0').rstrip('.') if precio % 1 != 0 else f"${int(precio)}"
+                
                 estado = f"{a['emoji']}"
-                linea = f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a['categoria']:<20} {stock_str:<10} {estado:<10}"
+                
+                linea = f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a['categoria']:<20} {precio_str:<12} {stock_str:<10} {estado:<10}"
                 print(f"{a['color']}{linea}{self.inventario_service.COLOR_RESET}")
+            
+            print("-" * 107)
+            print("Opciones de edición:")
+            print("  [E] Editar TODO (categoría, nombre, stock) - Ingrese ID")
+            print("  [M] Editar solo PRECIO en dólares $ - Ingrese ID")
+            print("  [V] Volver al menú")
+            print("-" * 40)
+            
+            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip().upper()
+            
+            if opcion == 'V':
+                break
+            
+            elif opcion == 'E':
+                try:
+                    id_input = input("ID del artículo a editar (todo excepto precio): ").strip()
+                    if id_input.isdigit():
+                        id_editar = int(id_input)
+                        articulo = self.articulo_service.obtener_por_id(id_editar)
+                        if articulo:
+                            self._editar_articulo_completo(id_editar)
+                        else:
+                            print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {id_editar}{self.COLOR_RESET}")
+                            self.pausa()
+                    else:
+                        print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
+                        self.pausa()
+                except Exception as e:
+                    print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+                    self.pausa()
+            
+            elif opcion == 'M':
+                try:
+                    id_input = input("ID del artículo a editar (solo precio $): ").strip()
+                    if id_input.isdigit():
+                        id_editar = int(id_input)
+                        articulo = self.articulo_service.obtener_por_id(id_editar)
+                        if articulo:
+                            self._editar_precio_articulo(id_editar)
+                        else:
+                            print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {id_editar}{self.COLOR_RESET}")
+                            self.pausa()
+                    else:
+                        print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
+                        self.pausa()
+                except Exception as e:
+                    print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+                    self.pausa()
+            
+            elif opcion.isdigit():
+                # Si el usuario ingresa directamente un número, por defecto va a edición completa
+                id_editar = int(opcion)
+                articulo = self.articulo_service.obtener_por_id(id_editar)
+                if articulo:
+                    self._editar_articulo_completo(id_editar)
+                else:
+                    print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {id_editar}{self.COLOR_RESET}")
+                    self.pausa()
+            
+            else:
+                print(f"{self.COLOR_ROJO}❌ Opción no válida{self.COLOR_RESET}")
+                self.pausa()
+
+    def _editar_precio_articulo(self, idarticulo):
+        """
+        Edita SOLO el precio de un artículo (rápido)
+        """
+        self.mostrar_cabecera(f"EDITAR PRECIO - ID: {idarticulo}")
+        
+        art = self.articulo_service.obtener_por_id(idarticulo)
+        
+        if not art:
+            print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {idarticulo}{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # Mostrar información actual
+        print(f"\n{self.COLOR_VERDE}📌 Artículo:{self.COLOR_RESET} {art['nombre']}")
+        print(f"   Código: {art['codigo']}")
+        print(f"   Precio actual: ${art.get('precio_venta', 0):.2f}".rstrip('0').rstrip('.') if art.get('precio_venta', 0) % 1 != 0 else f"   Precio actual: ${int(art.get('precio_venta', 0))}")
+        
+        print(f"\n{self.COLOR_AMARILLO}💰 Ingrese el nuevo precio en DÓLARES (puede usar decimales: 0.60, 2.5, 4.50):{self.COLOR_RESET}")
+        
+        try:
+            precio_input = input(f"Nuevo precio $: ").strip()
+            if precio_input:
+                nuevo_precio = float(precio_input.replace(',', '.'))
+                if nuevo_precio >= 0:
+                    
+                    # Actualizar solo el precio en BD
+                    if self.articulo_service.actualizar(
+                        idarticulo=idarticulo,
+                        codigo=art['codigo'],
+                        nombre=art['nombre'],
+                        idcategoria=art['idcategoria'],
+                        idpresentacion=art['idpresentacion'],
+                        descripcion=art.get('descripcion'),
+                        precio_venta=nuevo_precio,
+                        precio_referencia=art.get('precio_referencia')
+                    ):
+                        # Mostrar formato apropiado
+                        if nuevo_precio == int(nuevo_precio):
+                            print(f"\n{self.COLOR_VERDE}✅ Precio actualizado a ${int(nuevo_precio)}{self.COLOR_RESET}")
+                        else:
+                            print(f"\n{self.COLOR_VERDE}✅ Precio actualizado a ${nuevo_precio:.2f}".rstrip('0').rstrip('.') + f"{self.COLOR_RESET}")
+                    else:
+                        print(f"\n{self.COLOR_ROJO}❌ Error al actualizar precio{self.COLOR_RESET}")
+                else:
+                    print("❌ El precio no puede ser negativo")
+            else:
+                print("Precio no modificado")
+                
+        except ValueError:
+            print(f"{self.COLOR_ROJO}❌ Error: Ingrese un número válido (ej: 150, 0.60, 2.5){self.COLOR_RESET}")
+        except Exception as e:
+            print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+        
+        self.pausa()
+
+    def _editar_articulo_completo(self, idarticulo):
+        """
+        Edita un artículo completo (todo excepto precio)
+        """
+        self.mostrar_cabecera(f"EDITAR ARTÍCULO COMPLETO - ID: {idarticulo}")
+        
+        art = self.articulo_service.obtener_por_id(idarticulo)
+        
+        if not art:
+            print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {idarticulo}{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # Mostrar información actual
+        print(f"\n{self.COLOR_VERDE}📌 Datos actuales:{self.COLOR_RESET}")
+        print(f"   Código: {art['codigo']}")
+        print(f"   Nombre: {art['nombre']}")
+        
+        # Obtener precio actual (FORZAR A FLOAT)
+        precio_actual = art.get('precio_venta', 0)
+        try:
+            precio_actual = float(precio_actual)
+        except:
+            precio_actual = 0.0
+        
+        print(f"   Precio actual: ${precio_actual:,.2f}")
+        
+        # Obtener stock actual
+        stock_actual = self.inventario_service.obtener_stock_articulo(idarticulo)
+        print(f"   Stock actual: {stock_actual} unidades")
+        
+        print(f"\n{self.COLOR_AMARILLO}📝 Ingrese los nuevos datos (Enter para mantener):{self.COLOR_RESET}")
+        print()
+        
+        # Código
+        nuevo_codigo = input(f"Código [{art['codigo']}]: ").strip() or art['codigo']
+        
+        # Nombre
+        nuevo_nombre = input(f"Nombre [{art['nombre']}]: ").strip() or art['nombre']
+        
+        # Categoría
+        categorias = self.categoria_service.listar()
+        print("\nCategorías disponibles:")
+        for c in categorias:
+            print(f"  {c['idcategoria']}. {c['nombre']}")
+        try:
+            cat_input = input(f"ID categoría [{art['idcategoria']}]: ").strip()
+            nueva_categoria = int(cat_input) if cat_input else art['idcategoria']
+        except:
+            nueva_categoria = art['idcategoria']
+        
+        # Stock (opcional)
+        print("\n" + "="*40)
+        print("¿Desea ajustar el stock?")
+        print("1. Sí, agregar stock")
+        print("2. Sí, quitar stock")
+        print("3. No, mantener stock")
+        opcion_stock = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion_stock == '1':
+            try:
+                cantidad = int(input("Cantidad a AGREGAR: "))
+                if cantidad > 0:
+                    self.inventario_service.reponer_stock(
+                        idarticulo=idarticulo,
+                        cantidad=cantidad,
+                        idingreso=None,
+                        precio_compra=art.get('precio_referencia', 0)
+                    )
+                    print(f"{self.COLOR_VERDE}✅ Stock aumentado: +{cantidad} unidades{self.COLOR_RESET}")
+            except:
+                print("❌ Cantidad inválida")
+        
+        elif opcion_stock == '2':
+            try:
+                cantidad = int(input("Cantidad a QUITAR: "))
+                if cantidad > 0 and cantidad <= stock_actual:
+                    self.inventario_service.descontar_stock(
+                        idarticulo=idarticulo,
+                        cantidad=cantidad,
+                        idventa=None,
+                        precio_unitario=precio_actual
+                    )
+                    print(f"{self.COLOR_VERDE}✅ Stock disminuido: -{cantidad} unidades{self.COLOR_RESET}")
+                else:
+                    print(f"❌ Cantidad inválida o superior al stock actual ({stock_actual})")
+            except:
+                print("❌ Cantidad inválida")
+        
+        # Actualizar en BD (MANTENIENDO EL PRECIO ACTUAL)
+        print(f"\n🔍 Manteniendo precio: ${precio_actual:,.2f}")
+        
+        if self.articulo_service.actualizar(
+            idarticulo=idarticulo,
+            codigo=nuevo_codigo,
+            nombre=nuevo_nombre,
+            idcategoria=nueva_categoria,
+            idpresentacion=art['idpresentacion'],
+            descripcion=art.get('descripcion'),
+            precio_venta=precio_actual,  # Pasamos el precio actual como float
+            precio_referencia=art.get('precio_referencia')
+        ):
+            print(f"\n{self.COLOR_VERDE}✅ Artículo actualizado correctamente (precio mantenido en ${precio_actual:,.2f}){self.COLOR_RESET}")
+        else:
+            print(f"\n{self.COLOR_ROJO}❌ Error al actualizar{self.COLOR_RESET}")
         
         self.pausa()
     
     @requiere_permiso('articulos_crear')
     def _crear_articulo(self):
-        """Crea un nuevo artículo"""
+        """Crea un nuevo artículo con precio de venta"""
         self.mostrar_cabecera("CREAR ARTÍCULO")
         
         # Mostrar categorías disponibles
@@ -1648,12 +1890,38 @@ class SistemaVentas:
         nombre = input("Nombre del artículo: ")
         descripcion = input("Descripción (opcional): ") or None
         
+        # Solicitar precio de venta
+        print("\n💰 PRECIO DE VENTA")
+        print("="*40)
+        try:
+            precio_venta = float(input("Precio de venta (Bs.): "))
+            if precio_venta < 0:
+                print("❌ El precio no puede ser negativo")
+                precio_venta = 0
+        except:
+            print("❌ Precio inválido. Se asignará 0 por defecto.")
+            precio_venta = 0
+        
+        # Solicitar precio de referencia (opcional)
+        print("\n📦 PRECIO DE REFERENCIA (costo)")
+        print("="*40)
+        print("(Opcional - Enter para omitir)")
+        try:
+            precio_ref_input = input("Precio de referencia (costo): ").strip()
+            if precio_ref_input:
+                precio_referencia = float(precio_ref_input)
+                if precio_referencia < 0:
+                    precio_referencia = 0
+            else:
+                precio_referencia = None
+        except:
+            precio_referencia = None
+        
         # Solicitar stock inicial
         print("\n📦 STOCK INICIAL")
         print("="*40)
-        print("Ingrese la cantidad inicial en inventario:")
         try:
-            stock_inicial = int(input("Cantidad: "))
+            stock_inicial = int(input("Cantidad inicial: "))
             if stock_inicial < 0:
                 print("❌ La cantidad no puede ser negativa")
                 stock_inicial = 0
@@ -1661,7 +1929,10 @@ class SistemaVentas:
             print("❌ Cantidad inválida. Se asignará 0 por defecto.")
             stock_inicial = 0
         
-        if self.articulo_service.crear(codigo, nombre, idcat, idpres, descripcion):
+        if self.articulo_service.crear(
+            codigo, nombre, idcat, idpres, descripcion, 
+            precio_venta, precio_referencia
+        ):
             print(f"\n{self.COLOR_VERDE}✅ Artículo creado exitosamente{self.COLOR_RESET}")
             
             # Buscar el ID del artículo recién creado
@@ -1675,15 +1946,18 @@ class SistemaVentas:
                         idarticulo=idarticulo,
                         cantidad=stock_inicial,
                         idingreso=None,
-                        precio_compra=0
+                        precio_compra=precio_referencia or 0
                     )
                     print(f"   📦 Stock inicial: {stock_inicial} unidades")
+                    print(f"   💰 Precio venta: Bs. {precio_venta:.2f}")
+                    if precio_referencia:
+                        print(f"   💰 Precio referencia: Bs. {precio_referencia:.2f}")
                 
                 self.registrar_auditoria(
                     accion="CREAR",
                     tabla="articulo",
                     registro_id=idarticulo,
-                    datos_nuevos=f"Artículo: {nombre}, Código: {codigo}, Stock inicial: {stock_inicial}"
+                    datos_nuevos=f"Artículo: {nombre}, Código: {codigo}, Precio: {precio_venta}"
                 )
         else:
             print(f"\n{self.COLOR_ROJO}❌ Error al crear el artículo{self.COLOR_RESET}")
@@ -2936,7 +3210,7 @@ class SistemaVentas:
     
     def _mostrar_resultado_busqueda(self, valor, tipo):
         """
-        NUEVO: Muestra resultados de búsqueda según el tipo
+        Muestra resultados de búsqueda según el tipo
         """
         if tipo == 'codigo':
             articulo = self.articulo_service.buscar_por_codigo_barras(valor)
@@ -2956,10 +3230,17 @@ class SistemaVentas:
             resultados = self.articulo_service.buscar_por_nombre(valor)
             if resultados:
                 print(f"\n{self.COLOR_VERDE}📋 RESULTADOS ({len(resultados)}):{self.COLOR_RESET}")
-                print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<50} {'PRECIO':<10}")
-                print("-" * 80)
+                print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<40} {'PRECIO':<12}")
+                print("-" * 72)
                 for art in resultados:
-                    print(f"{art['idarticulo']:<5} {art['codigo']:<15} {art['nombre']:<50} {art.get('precio_venta', 0):>10.2f}")
+                    precio = art.get('precio_venta', 0)
+                    print(f"{art['idarticulo']:<5} {art['codigo']:<15} {art['nombre']:<40} Bs.{precio:>10,.2f}")
+                
+                # Opción de editar desde resultados
+                print("\n" + "-" * 30)
+                editar = input(f"{self.COLOR_AMARILLO}¿Editar algún artículo? (ID o Enter para continuar): {self.COLOR_RESET}").strip()
+                if editar.isdigit():
+                    self._editar_articulo_por_id(int(editar))
             else:
                 print(f"{self.COLOR_ROJO}❌ No se encontraron artículos{self.COLOR_RESET}")
     

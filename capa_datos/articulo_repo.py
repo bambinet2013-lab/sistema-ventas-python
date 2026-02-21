@@ -18,17 +18,15 @@ class ArticuloRepositorio:
     
     def listar(self):
         """
-        Lista todos los artículos activos
-        
-        Returns:
-            list: Lista de artículos o lista vacía si hay error
+        Lista todos los artículos con sus precios
         """
         try:
             cursor = self.conn.cursor()
             query = """
             SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
                    a.idcategoria, c.nombre as categoria,
-                   a.idpresentacion, p.nombre as presentacion
+                   a.idpresentacion, p.nombre as presentacion,
+                   a.precio_venta, a.precio_referencia
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
@@ -36,10 +34,7 @@ class ArticuloRepositorio:
             """
             cursor.execute(query)
             
-            # Obtener los nombres de las columnas
             columns = [column[0] for column in cursor.description]
-            
-            # Convertir las filas a diccionarios
             rows = cursor.fetchall()
             result = []
             for row in rows:
@@ -57,20 +52,15 @@ class ArticuloRepositorio:
     
     def obtener_por_id(self, idarticulo):
         """
-        Obtiene un artículo por su ID
-        
-        Args:
-            idarticulo (int): ID del artículo
-            
-        Returns:
-            dict: Datos del artículo o None si no existe
+        Obtiene un artículo por su ID incluyendo precio_venta
         """
         try:
             cursor = self.conn.cursor()
             query = """
             SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
                    a.idcategoria, c.nombre as categoria,
-                   a.idpresentacion, p.nombre as presentacion
+                   a.idpresentacion, p.nombre as presentacion,
+                   a.precio_venta, a.precio_referencia
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
@@ -93,19 +83,11 @@ class ArticuloRepositorio:
             return None
     
     def buscar_por_codigo(self, codigo):
-        """
-        Busca un artículo por su código
-        
-        Args:
-            codigo (str): Código del artículo
-            
-        Returns:
-            dict: Datos del artículo o None si no existe
-        """
+        """Busca un artículo por su código"""
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT idarticulo, codigo, nombre
+            SELECT idarticulo, codigo, nombre, precio_venta
             FROM articulo 
             WHERE codigo = ?
             """
@@ -125,38 +107,32 @@ class ArticuloRepositorio:
             logger.error(f"Error al buscar artículo por código {codigo}: {e}")
             return None
     
-    def crear(self, codigo, nombre, idcategoria, idpresentacion, descripcion=None, imagen=None):
+    def crear(self, codigo, nombre, idcategoria, idpresentacion, descripcion=None, 
+              imagen=None, precio_venta=0, precio_referencia=None):
         """
-        Inserta un nuevo artículo
-        
-        Args:
-            codigo (str): Código del artículo
-            nombre (str): Nombre del artículo
-            idcategoria (int): ID de la categoría
-            idpresentacion (int): ID de la presentación
-            descripcion (str, optional): Descripción
-            imagen (bytes, optional): Imagen del artículo
-            
-        Returns:
-            int or None: ID del artículo creado o None si hay error
+        Inserta un nuevo artículo con precio de venta
         """
         try:
             cursor = self.conn.cursor()
             
             query = """
             INSERT INTO articulo 
-            (codigo, nombre, idcategoria, idpresentacion, descripcion, imagen)
+            (codigo, nombre, idcategoria, idpresentacion, descripcion, imagen, 
+             precio_venta, precio_referencia)
             OUTPUT INSERTED.idarticulo
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
             
-            cursor.execute(query, (codigo, nombre, idcategoria, idpresentacion, descripcion, imagen))
+            cursor.execute(query, (
+                codigo, nombre, idcategoria, idpresentacion, descripcion, imagen,
+                precio_venta, precio_referencia
+            ))
             
             row = cursor.fetchone()
             idarticulo = row[0] if row else None
             self.conn.commit()
             
-            logger.info(f"✅ Artículo creado con ID: {idarticulo} - Código: {codigo}")
+            logger.info(f"✅ Artículo creado con ID: {idarticulo} - Código: {codigo} - Precio: {precio_venta}")
             return idarticulo
             
         except Exception as e:
@@ -164,42 +140,57 @@ class ArticuloRepositorio:
             self.conn.rollback()
             return None
     
-    def actualizar(self, idarticulo, codigo, nombre, idcategoria, idpresentacion, descripcion=None, imagen=None):
+    def actualizar(self, idarticulo, codigo, nombre, idcategoria, idpresentacion, 
+                   descripcion=None, imagen=None, precio_venta=None, precio_referencia=None):
         """
-        Actualiza un artículo existente
-        
-        Args:
-            idarticulo (int): ID del artículo
-            codigo (str): Código del artículo
-            nombre (str): Nombre del artículo
-            idcategoria (int): ID de la categoría
-            idpresentacion (int): ID de la presentación
-            descripcion (str, optional): Descripción
-            imagen (bytes, optional): Imagen del artículo
-            
-        Returns:
-            bool: True si se actualizó correctamente, False en caso contrario
+        Actualiza un artículo existente incluyendo precios
         """
         try:
             cursor = self.conn.cursor()
             
-            if imagen is not None:
-                query = """
-                UPDATE articulo 
-                SET codigo = ?, nombre = ?, idcategoria = ?, 
-                    idpresentacion = ?, descripcion = ?, imagen = ?
-                WHERE idarticulo = ?
-                """
-                cursor.execute(query, (codigo, nombre, idcategoria, idpresentacion, descripcion, imagen, idarticulo))
-            else:
-                query = """
-                UPDATE articulo 
-                SET codigo = ?, nombre = ?, idcategoria = ?, 
-                    idpresentacion = ?, descripcion = ?
-                WHERE idarticulo = ?
-                """
-                cursor.execute(query, (codigo, nombre, idcategoria, idpresentacion, descripcion, idarticulo))
+            # Construir query dinámicamente según qué campos vengan
+            campos = []
+            valores = []
             
+            campos.append("codigo = ?")
+            valores.append(codigo)
+            
+            campos.append("nombre = ?")
+            valores.append(nombre)
+            
+            campos.append("idcategoria = ?")
+            valores.append(idcategoria)
+            
+            campos.append("idpresentacion = ?")
+            valores.append(idpresentacion)
+            
+            campos.append("descripcion = ?")
+            valores.append(descripcion)
+            
+            # Solo agregar precio_venta si se proporciona explícitamente
+            if precio_venta is not None:
+                campos.append("precio_venta = ?")
+                valores.append(precio_venta)
+            
+            # Solo agregar precio_referencia si se proporciona explícitamente
+            if precio_referencia is not None:
+                campos.append("precio_referencia = ?")
+                valores.append(precio_referencia)
+            
+            if imagen is not None:
+                campos.append("imagen = ?")
+                valores.append(imagen)
+            
+            # Agregar ID al final
+            valores.append(idarticulo)
+            
+            query = f"""
+            UPDATE articulo 
+            SET {', '.join(campos)}
+            WHERE idarticulo = ?
+            """
+            
+            cursor.execute(query, valores)
             self.conn.commit()
             afectadas = cursor.rowcount
             
@@ -276,23 +267,14 @@ class ArticuloRepositorio:
             return False
     
     def buscar_por_nombre(self, termino):
-        """
-        Busca artículos por nombre (búsqueda parcial)
-        
-        Args:
-            termino (str): Término de búsqueda
-            
-        Returns:
-            list: Lista de artículos que coinciden
-        """
+        """Busca artículos por nombre"""
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT idarticulo, codigo, nombre, descripcion
+            SELECT idarticulo, codigo, nombre, precio_venta
             FROM articulo 
             WHERE nombre LIKE ? OR codigo LIKE ?
             ORDER BY nombre
-            LIMIT 20
             """
             busqueda = f"%{termino}%"
             cursor.execute(query, (busqueda, busqueda))
@@ -309,7 +291,7 @@ class ArticuloRepositorio:
             return result
             
         except Exception as e:
-            logger.error(f"Error al buscar artículos por nombre '{termino}': {e}")
+            logger.error(f"Error buscando por nombre '{termino}': {e}")
             return []
     
     def contar_articulos(self):
@@ -371,14 +353,11 @@ class ArticuloRepositorio:
             return []
 
     def buscar_por_codigo_barras(self, codigo):
-        """
-        NUEVO: Busca artículo por código de barras
-        """
+        """Busca artículo por código de barras"""
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT idarticulo, codigo, nombre, precio_venta, 
-                   tipo_medida, precio_por_kilo, es_pesado
+            SELECT idarticulo, codigo, nombre, precio_venta, tipo_medida, precio_por_kilo, es_pesado
             FROM articulo 
             WHERE codigo_barras = ?
             """
@@ -400,13 +379,12 @@ class ArticuloRepositorio:
     
     def buscar_por_plu(self, plu):
         """
-        NUEVO: Busca artículo por código interno PLU
+        Busca artículo por código interno PLU
         """
         try:
             cursor = self.conn.cursor()
             query = """
-            SELECT idarticulo, codigo, nombre, precio_venta,
-                   tipo_medida, precio_por_kilo, es_pesado
+            SELECT idarticulo, codigo, nombre, tipo_medida, precio_por_kilo, es_pesado
             FROM articulo 
             WHERE plu = ?
             """
@@ -424,34 +402,4 @@ class ArticuloRepositorio:
             
         except Exception as e:
             logger.error(f"Error buscando por PLU {plu}: {e}")
-            return None
-    
-    def buscar_por_nombre(self, termino):
-        """
-        NUEVO: Busca artículos por nombre (búsqueda parcial)
-        """
-        try:
-            cursor = self.conn.cursor()
-            query = """
-            SELECT idarticulo, codigo, nombre, precio_venta
-            FROM articulo 
-            WHERE nombre LIKE ? OR codigo LIKE ?
-            ORDER BY nombre
-            """
-            busqueda = f"%{termino}%"
-            cursor.execute(query, (busqueda, busqueda))
-            
-            columns = [column[0] for column in cursor.description]
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                row_dict = {}
-                for i, col in enumerate(columns):
-                    row_dict[col] = row[i]
-                result.append(row_dict)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error buscando por nombre '{termino}': {e}")
-            return []
+            return None    

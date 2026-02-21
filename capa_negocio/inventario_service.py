@@ -243,7 +243,7 @@ class InventarioService(BaseService):
             resultado = []
             
             for art in articulos:
-                stock = self.obtener_stock_articulo(art['idarticulo'])  # <-- Usa el método corregido
+                stock = self.obtener_stock_articulo(art['idarticulo'])
                 nivel = self.obtener_nivel_stock(stock)
                 
                 resultado.append({
@@ -251,15 +251,13 @@ class InventarioService(BaseService):
                     'codigo': art['codigo'],
                     'nombre': art['nombre'],
                     'categoria': art.get('categoria', 'Sin categoría'),
+                    'precio_venta': art.get('precio_venta', 0),
                     'stock_actual': stock,
                     'nivel_stock': nivel['nivel'],
                     'color': nivel['color'],
                     'emoji': nivel['emoji'],
                     'mensaje': nivel['mensaje']
                 })
-            
-            # Ordenar por stock (opcional)
-            resultado.sort(key=lambda x: x['idarticulo'])
             
             return resultado
             
