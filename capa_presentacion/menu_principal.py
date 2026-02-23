@@ -290,6 +290,9 @@ class SistemaVentas:
         print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_usd:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
         print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}{linea_eur:<78}{self.COLOR_AZUL}║{self.COLOR_RESET}")
         
+        # NUEVA OPCIÓN PARA MODIFICAR TASAS
+        print(f"{self.COLOR_AZUL}║{self.COLOR_RESET}      {self.COLOR_AMARILLO}[X]{self.COLOR_RESET} Modificar tasas de cambio{' ' * 54}{self.COLOR_AZUL}║{self.COLOR_RESET}")
+        
         # Línea separadora
         print(f"{self.COLOR_AZUL}╠" + "═" * 78 + f"╣{self.COLOR_RESET}")
         
@@ -365,6 +368,8 @@ class SistemaVentas:
         # Línea inferior
         print(f"{self.COLOR_AZUL}╚" + "═" * 78 + f"╝{self.COLOR_RESET}")
         print()
+        
+        return input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
         
         return input(f"{self.COLOR_AMARILLO}🔹 Seleccione una opción: {self.COLOR_RESET}").strip()
 
@@ -2225,16 +2230,25 @@ class SistemaVentas:
             else:
                 print("❌ Opción no válida")
                 self.pausa()
-    
+
     @requiere_permiso('ventas_crear')
     def _registrar_venta(self):
-        """Registra una nueva venta con multimoneda y búsqueda avanzada"""
+        """Registra una nueva venta usando precios de artículos y tasas preconfiguradas"""
         self.mostrar_cabecera("REGISTRAR VENTA - MULTIMONEDA")
         
         # Obtener usuario actual
         usuario = self.trabajador_service.get_usuario_actual()
         if not usuario:
             print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión para registrar ventas{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # Obtener tasas actuales preconfiguradas
+        tasas_actuales = self.obtener_tasas_actuales()
+        tasa_usd = tasas_actuales.get('USD', 0)
+        
+        if tasa_usd <= 0:
+            print(f"{self.COLOR_AMARILLO}⚠️ No hay tasa USD configurada. Use [X] en el menú principal.{self.COLOR_RESET}")
             self.pausa()
             return
         
@@ -2408,38 +2422,17 @@ class SistemaVentas:
             print("✅ Venta sin identificación de cliente")
             idcliente = None
         
-        # ===== SELECCIÓN DE MONEDA =====
-        print("\n" + "="*60)
-        print("💰 SELECCIÓN DE MONEDA")
-        print("="*60)
-        print("1. 🇻🇪 Bolívares (VES)")
-        print("2. 🇺🇸 Dólares (USD)")
-        print("3. 🇪🇺 Euros (EUR)")
-        opcion_moneda = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de la factura: {self.COLOR_RESET}").strip()
-        
-        moneda_map = {'1': 'VES', '2': 'USD', '3': 'EUR'}
-        moneda = moneda_map.get(opcion_moneda, 'VES')
-        
-        # Mostrar tasa actual si es USD
-        if moneda == 'USD':
-            if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
-                tasa = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
-                if tasa:
-                    print(f"\n{self.COLOR_VERDE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
-                else:
-                    print(f"\n{self.COLOR_AMARILLO}⚠️ No hay tasa registrada. Se solicitará al momento de la venta.{self.COLOR_RESET}")
-        
         # ===== MONEDA DE PAGO =====
         print("\n" + "="*60)
         print("💳 MONEDA DE PAGO")
         print("="*60)
-        print("1. Misma moneda de la factura")
-        print("2. Dólares (USD)")
-        print("3. Bolívares (VES)")
+        print("1. Dólares (USD)")
+        print("2. Bolívares (VES)")
+        print("3. Euros (EUR)")
         opcion_pago = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de pago: {self.COLOR_RESET}").strip()
         
-        moneda_pago_map = {'1': moneda, '2': 'USD', '3': 'VES'}
-        moneda_pago = moneda_pago_map.get(opcion_pago, moneda)
+        moneda_pago_map = {'1': 'USD', '2': 'VES', '3': 'EUR'}
+        moneda_pago = moneda_pago_map.get(opcion_pago, 'USD')
         
         # ===== DATOS DEL COMPROBANTE =====
         print("\n" + "="*60)
@@ -2468,77 +2461,245 @@ class SistemaVentas:
         serie = input("Serie (ej. F001): ")
         numero = input("Número: ")
         
-        # ===== AGREGAR PRODUCTOS (VERSIÓN MEJORADA) =====
+        # ===== NUEVA INTERFAZ DE AGREGAR PRODUCTOS (SIN EL MALDITO "--- Agregar producto ---") =====
         detalle = []
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print("🛒 AGREGAR PRODUCTOS")
-        print("="*50)
-        print(f"{self.COLOR_VERDE}💡 Use '?' para ver lista, '*' para búsqueda avanzada{self.COLOR_RESET}")
+        print("="*60)
+        print(f"💡 {self.COLOR_VERDE}Seleccione una opción:{self.COLOR_RESET}")
+        print(f"   {self.COLOR_VERDE}[1]{self.COLOR_RESET} Buscar por nombre")
+        print(f"   {self.COLOR_VERDE}[2]{self.COLOR_RESET} Buscar por código")
+        print(f"   {self.COLOR_VERDE}[3]{self.COLOR_RESET} Ver lista completa con precios")
+        print(f"   {self.COLOR_VERDE}[4]{self.COLOR_RESET} Finalizar venta")
+        print(f"💰 Tasa USD actual: {self.COLOR_AMARILLO}Bs. {tasa_usd:.2f}{self.COLOR_RESET}")
+        print("="*60)
         
         while True:
-            print("\n--- Agregar producto ---")
-            entrada = input("Código/PLU (0=terminar, ?=lista, *=búsqueda): ").lower()
+            opcion_producto = input(f"{self.COLOR_AMARILLO}🔹 Seleccione opción (1-4): {self.COLOR_RESET}").strip()
             
-            if entrada == '0':
+            if opcion_producto == '4':
                 break
             
-            elif entrada == '?':
+            elif opcion_producto == '3':
                 self._mostrar_lista_articulos()
-                continue
-            
-            elif entrada == '*':
-                # Búsqueda avanzada
-                art = self._buscar_articulo_para_venta()
-                if not art:
+                codigo_articulo = input(f"{self.COLOR_AMARILLO}🔹 Ingrese el código del artículo a agregar (0 para volver): {self.COLOR_RESET}").strip()
+                
+                if codigo_articulo == '0':
                     continue
-            else:
-                # Buscar por código normal o código de barras
-                art = self.articulo_service.buscar_por_codigo(entrada)
+                
+                # Buscar el artículo por código
+                art = self.articulo_service.buscar_por_codigo(codigo_articulo)
                 if not art:
-                    art = self.articulo_service.buscar_por_codigo_barras(entrada)
-            
-            if not art:
-                print(f"{self.COLOR_ROJO}❌ Artículo no encontrado. Use '*' para búsqueda avanzada{self.COLOR_RESET}")
-                continue
-            
-            # Inicializar variables
-            cantidad = 1
-            precio = 0
-            
-            # Si es producto pesado, ya viene con precio calculado
-            if 'precio_calculado' in art:
-                precio = art['precio_calculado']
-                cantidad = art.get('cantidad', 1)
-                print(f"📌 Artículo: {art['nombre']} - {cantidad:.3f} kg - Precio: {precio:.2f}")
-            else:
-                # Producto normal, pedir cantidad
+                    art = self.articulo_service.buscar_por_codigo_barras(codigo_articulo)
+                
+                if not art:
+                    print(f"{self.COLOR_ROJO}❌ Artículo no encontrado{self.COLOR_RESET}")
+                    continue
+                
+                # Procesar el artículo encontrado
+                try:
+                    precio_usd = float(art.get('precio_venta', 0))
+                except:
+                    precio_usd = 0.0
+                
+                if precio_usd <= 0:
+                    print(f"{self.COLOR_AMARILLO}⚠️ Este artículo tiene precio $0. ¿Desea continuar? (s/N){self.COLOR_RESET}")
+                    if input().lower() != 's':
+                        continue
+                
                 stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
-                print(f"📌 Artículo: {art['nombre']} - Stock disponible: {stock} unidades")
+                print(f"\n{self.COLOR_VERDE}📌 Artículo seleccionado:{self.COLOR_RESET}")
+                print(f"   Nombre: {art['nombre']}")
+                print(f"   Precio: ${precio_usd:.2f} USD")
+                print(f"   Stock: {stock} und")
                 
                 try:
-                    tipo_medida = art.get('tipo_medida', 'UNIDAD')
-                    if tipo_medida == 'PESO':
-                        cantidad = float(input("Cantidad (kg): "))
-                        unidad = 'kg'
-                    else:
-                        cantidad = int(input("Cantidad (unidades): "))
-                        unidad = 'und'
-                    
-                    if unidad == 'und' and cantidad > stock:
+                    cantidad = int(input("Cantidad: "))
+                    if cantidad <= 0:
+                        print("❌ La cantidad debe ser positiva")
+                        continue
+                    if cantidad > stock:
                         print(f"❌ Stock insuficiente. Solo hay {stock} unidades")
                         continue
-                    
-                    precio = float(input("Precio unitario: "))
-                except:
-                    print("❌ Cantidad o precio inválido")
+                except ValueError:
+                    print("❌ Cantidad inválida")
                     continue
+                
+                subtotal_usd = float(cantidad) * float(precio_usd)
+                subtotal_bs = subtotal_usd * float(tasa_usd)
+                
+                print(f"\n   Subtotal: ${subtotal_usd:.2f} USD = Bs. {subtotal_bs:.2f}")
+                
+                detalle.append({
+                    'idarticulo': art['idarticulo'],
+                    'cantidad': cantidad,
+                    'precio_venta': precio_usd,
+                    'nombre': art['nombre']
+                })
+                print(f"{self.COLOR_VERDE}✅ {art['nombre']} agregado{self.COLOR_RESET}")
+                
+                # Volver a mostrar el menú principal de productos
+                print("\n" + "="*60)
+                print("🛒 CONTINUAR AGREGANDO PRODUCTOS")
+                print("="*60)
+                print(f"💡 {self.COLOR_VERDE}Seleccione una opción:{self.COLOR_RESET}")
+                print(f"   {self.COLOR_VERDE}[1]{self.COLOR_RESET} Buscar por nombre")
+                print(f"   {self.COLOR_VERDE}[2]{self.COLOR_RESET} Buscar por código")
+                print(f"   {self.COLOR_VERDE}[3]{self.COLOR_RESET} Ver lista completa con precios")
+                print(f"   {self.COLOR_VERDE}[4]{self.COLOR_RESET} Finalizar venta")
+                print("="*60)
+                continue
             
-            detalle.append({
-                'idarticulo': art['idarticulo'],
-                'cantidad': cantidad,
-                'precio_venta': precio
-            })
-            print(f"✅ {art['nombre']} agregado")
+            elif opcion_producto == '2':
+                codigo = input("Ingrese código del artículo: ").strip()
+                art = self.articulo_service.buscar_por_codigo(codigo)
+                if not art:
+                    art = self.articulo_service.buscar_por_codigo_barras(codigo)
+                
+                if not art:
+                    print(f"{self.COLOR_ROJO}❌ Artículo no encontrado{self.COLOR_RESET}")
+                    continue
+                
+                # Procesar el artículo encontrado
+                try:
+                    precio_usd = float(art.get('precio_venta', 0))
+                except:
+                    precio_usd = 0.0
+                
+                if precio_usd <= 0:
+                    print(f"{self.COLOR_AMARILLO}⚠️ Este artículo tiene precio $0. ¿Desea continuar? (s/N){self.COLOR_RESET}")
+                    if input().lower() != 's':
+                        continue
+                
+                stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
+                print(f"\n{self.COLOR_VERDE}📌 Artículo encontrado:{self.COLOR_RESET}")
+                print(f"   Nombre: {art['nombre']}")
+                print(f"   Precio: ${precio_usd:.2f} USD")
+                print(f"   Stock: {stock} und")
+                
+                try:
+                    cantidad = int(input("Cantidad: "))
+                    if cantidad <= 0:
+                        print("❌ La cantidad debe ser positiva")
+                        continue
+                    if cantidad > stock:
+                        print(f"❌ Stock insuficiente. Solo hay {stock} unidades")
+                        continue
+                except ValueError:
+                    print("❌ Cantidad inválida")
+                    continue
+                
+                subtotal_usd = float(cantidad) * float(precio_usd)
+                subtotal_bs = subtotal_usd * float(tasa_usd)
+                
+                print(f"\n   Subtotal: ${subtotal_usd:.2f} USD = Bs. {subtotal_bs:.2f}")
+                
+                detalle.append({
+                    'idarticulo': art['idarticulo'],
+                    'cantidad': cantidad,
+                    'precio_venta': precio_usd,
+                    'nombre': art['nombre']
+                })
+                print(f"{self.COLOR_VERDE}✅ {art['nombre']} agregado{self.COLOR_RESET}")
+                
+                # Volver a mostrar el menú principal de productos
+                print("\n" + "="*60)
+                print("🛒 CONTINUAR AGREGANDO PRODUCTOS")
+                print("="*60)
+                print(f"💡 {self.COLOR_VERDE}Seleccione una opción:{self.COLOR_RESET}")
+                print(f"   {self.COLOR_VERDE}[1]{self.COLOR_RESET} Buscar por nombre")
+                print(f"   {self.COLOR_VERDE}[2]{self.COLOR_RESET} Buscar por código")
+                print(f"   {self.COLOR_VERDE}[3]{self.COLOR_RESET} Ver lista completa con precios")
+                print(f"   {self.COLOR_VERDE}[4]{self.COLOR_RESET} Finalizar venta")
+                print("="*60)
+                continue
+            
+            elif opcion_producto == '1':
+                nombre = input("Ingrese nombre del artículo: ").strip()
+                resultados = self.articulo_service.buscar_por_nombre(nombre)
+                
+                if not resultados:
+                    print(f"{self.COLOR_ROJO}❌ No se encontraron artículos{self.COLOR_RESET}")
+                    continue
+                
+                if len(resultados) == 1:
+                    art = resultados[0]
+                else:
+                    print(f"\n{self.COLOR_VERDE}📋 Múltiples resultados:{self.COLOR_RESET}")
+                    for i, a in enumerate(resultados, 1):
+                        precio = float(a.get('precio_venta', 0))
+                        if precio == int(precio):
+                            precio_str = f"${int(precio)}"
+                        else:
+                            precio_str = f"${precio:.2f}".rstrip('0').rstrip('.')
+                        print(f"  {i}. {a['nombre']} ({precio_str})")
+                    try:
+                        selec = int(input("Seleccione número: ")) - 1
+                        if 0 <= selec < len(resultados):
+                            art = resultados[selec]
+                        else:
+                            print("❌ Selección inválida")
+                            continue
+                    except:
+                        print("❌ Selección inválida")
+                        continue
+                
+                # Procesar el artículo seleccionado
+                try:
+                    precio_usd = float(art.get('precio_venta', 0))
+                except:
+                    precio_usd = 0.0
+                
+                if precio_usd <= 0:
+                    print(f"{self.COLOR_AMARILLO}⚠️ Este artículo tiene precio $0. ¿Desea continuar? (s/N){self.COLOR_RESET}")
+                    if input().lower() != 's':
+                        continue
+                
+                stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
+                print(f"\n{self.COLOR_VERDE}📌 Artículo seleccionado:{self.COLOR_RESET}")
+                print(f"   Nombre: {art['nombre']}")
+                print(f"   Precio: ${precio_usd:.2f} USD")
+                print(f"   Stock: {stock} und")
+                
+                try:
+                    cantidad = int(input("Cantidad: "))
+                    if cantidad <= 0:
+                        print("❌ La cantidad debe ser positiva")
+                        continue
+                    if cantidad > stock:
+                        print(f"❌ Stock insuficiente. Solo hay {stock} unidades")
+                        continue
+                except ValueError:
+                    print("❌ Cantidad inválida")
+                    continue
+                
+                subtotal_usd = float(cantidad) * float(precio_usd)
+                subtotal_bs = subtotal_usd * float(tasa_usd)
+                
+                print(f"\n   Subtotal: ${subtotal_usd:.2f} USD = Bs. {subtotal_bs:.2f}")
+                
+                detalle.append({
+                    'idarticulo': art['idarticulo'],
+                    'cantidad': cantidad,
+                    'precio_venta': precio_usd,
+                    'nombre': art['nombre']
+                })
+                print(f"{self.COLOR_VERDE}✅ {art['nombre']} agregado{self.COLOR_RESET}")
+                
+                # Volver a mostrar el menú principal de productos
+                print("\n" + "="*60)
+                print("🛒 CONTINUAR AGREGANDO PRODUCTOS")
+                print("="*60)
+                print(f"💡 {self.COLOR_VERDE}Seleccione una opción:{self.COLOR_RESET}")
+                print(f"   {self.COLOR_VERDE}[1]{self.COLOR_RESET} Buscar por nombre")
+                print(f"   {self.COLOR_VERDE}[2]{self.COLOR_RESET} Buscar por código")
+                print(f"   {self.COLOR_VERDE}[3]{self.COLOR_RESET} Ver lista completa con precios")
+                print(f"   {self.COLOR_VERDE}[4]{self.COLOR_RESET} Finalizar venta")
+                print("="*60)
+                continue
+            
+            else:
+                print(f"{self.COLOR_ROJO}❌ Opción no válida. Use 1-4{self.COLOR_RESET}")
         
         if not detalle:
             print("❌ Debe agregar al menos un producto")
@@ -2546,9 +2707,9 @@ class SistemaVentas:
             return
         
         # ===== RESUMEN DE VENTA =====
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print("📋 RESUMEN DE VENTA")
-        print("="*50)
+        print("="*60)
         
         if opcion_ident == '1' and cliente:
             print(f"Tipo: FACTURA CON RIF")
@@ -2563,37 +2724,36 @@ class SistemaVentas:
             print("Cliente: No identificado")
             print(f"ℹ️ {MENSAJES_LEGALES['consumidor_final']}")
         
-        print(f"Moneda factura: {moneda}")
         print(f"Moneda pago: {moneda_pago}")
+        print(f"Tasa USD: Bs. {tasa_usd:.2f}")
         print(f"Comprobante: {tipo_comprobante} {serie}-{numero}")
-        print("\nProductos:")
+        print("\n" + "-"*60)
+        print("PRODUCTOS:")
+        print("-"*60)
         
-        total = 0
+        total_usd = 0.0
         for item in detalle:
-            art = self.articulo_service.obtener_por_id(item['idarticulo'])
-            subtotal = item['cantidad'] * item['precio_venta']
-            total += subtotal
-            if 'cantidad' in item and isinstance(item['cantidad'], float):
-                print(f"  - {art['nombre']}: {item['cantidad']:.3f} kg x {item['precio_venta']:.2f} = {subtotal:.2f}")
+            cantidad = float(item['cantidad'])
+            precio = float(item['precio_venta'])
+            subtotal_usd = cantidad * precio
+            total_usd += subtotal_usd
+            if cantidad.is_integer():
+                print(f"  {item['nombre']:<30} x{int(cantidad):<3}  ${precio:.2f}  = ${subtotal_usd:.2f}")
             else:
-                print(f"  - {art['nombre']}: {item['cantidad']} x {item['precio_venta']:.2f} = {subtotal:.2f}")
+                print(f"  {item['nombre']:<30} x{cantidad:<3}  ${precio:.2f}  = ${subtotal_usd:.2f}")
         
-        iva_total = total * 0.16
-        total_con_iva = total + iva_total
+        iva_total_usd = total_usd * 0.16
+        total_con_iva_usd = total_usd + iva_total_usd
+        total_con_iva_bs = total_con_iva_usd * float(tasa_usd)
         
-        print(f"\n💰 SUBTOTAL: Bs. {total:.2f}")
-        print(f"💰 IVA (16%): Bs. {iva_total:.2f}")
+        print("-"*60)
+        print(f"{'SUBTOTAL:':<40} ${total_usd:.2f}")
+        print(f"{'IVA (16%):':<40} ${iva_total_usd:.2f}")
+        print(f"{'TOTAL USD:':<40} ${total_con_iva_usd:.2f}")
+        print(f"{'TOTAL Bs.:':<40} Bs. {total_con_iva_bs:.2f}")
+        print("="*60)
         
-        if moneda == 'USD':
-            print(f"💰 TOTAL: ${total_con_iva:.2f} USD")
-        elif moneda == 'EUR':
-            print(f"💰 TOTAL: €{total_con_iva:.2f} EUR")
-        else:
-            print(f"💰 TOTAL: Bs. {total_con_iva:.2f}")
-        
-        print("="*50)
-        
-        confirmar = input(f"{self.COLOR_AMARILLO}¿Confirmar venta? (s/N): {self.COLOR_RESET}").lower()
+        confirmar = input(f"\n{self.COLOR_AMARILLO}¿Confirmar venta? (s/N): {self.COLOR_RESET}").lower()
         if confirmar != 's':
             print("Operación cancelada")
             self.pausa()
@@ -2608,13 +2768,14 @@ class SistemaVentas:
             numero, 
             16.0,
             detalle,
-            moneda=moneda,
-            moneda_pago=moneda_pago
+            moneda='USD',
+            moneda_pago=moneda_pago,
+            tasa_cambio=tasa_usd
         )
         
         if idventa:
             print(f"\n{self.COLOR_VERDE}✅ Venta #{idventa} registrada correctamente{self.COLOR_RESET}")
-            print("="*50)
+            print("="*60)
             print("🎫 DATOS DE LA FACTURA:")
             print(f"   Número: {tipo_comprobante} {serie}-{numero}")
             
@@ -2628,16 +2789,12 @@ class SistemaVentas:
                 print("   Cliente: CONSUMIDOR FINAL")
                 print("   Identificación: No aplica")
             
-            if moneda == 'USD':
-                print(f"   Total: ${total_con_iva:.2f} USD")
-            elif moneda == 'EUR':
-                print(f"   Total: €{total_con_iva:.2f} EUR")
-            else:
-                print(f"   Total: Bs. {total_con_iva:.2f}")
-            
+            print(f"   Total USD: ${total_con_iva_usd:.2f}")
+            print(f"   Total Bs.: Bs. {total_con_iva_bs:.2f}")
+            print(f"   Tasa aplicada: {tasa_usd:.2f}")
             print(f"   Moneda pago: {moneda_pago}")
             print(f"   {MENSAJES_LEGALES['factura_digital']}")
-            print("="*50)
+            print("="*60)
             
             # Preguntar si desea imprimir factura
             imprimir = input(f"\n{self.COLOR_AMARILLO}¿Desea imprimir la factura? (s/N): {self.COLOR_RESET}").lower()
@@ -2649,7 +2806,7 @@ class SistemaVentas:
                 accion="CREAR",
                 tabla="venta",
                 registro_id=idventa,
-                datos_nuevos=f"Venta #{idventa} - {tipo_cliente} - Total: {total_con_iva:.2f} {moneda}"
+                datos_nuevos=f"Venta #{idventa} - {tipo_cliente} - Total: ${total_con_iva_usd:.2f} (Bs. {total_con_iva_bs:.2f})"
             )
         else:
             print(f"\n{self.COLOR_ROJO}❌ Error al registrar la venta{self.COLOR_RESET}")
@@ -2659,38 +2816,21 @@ class SistemaVentas:
     def _continuar_flujo_venta(self, usuario, idcliente, cliente, opcion_ident):
         """Continuación del flujo de venta después de seleccionar cliente"""
         
-        # ===== SELECCIÓN DE MONEDA =====
-        print("\n" + "="*60)
-        print("💰 SELECCIÓN DE MONEDA")
-        print("="*60)
-        print("1. 🇻🇪 Bolívares (VES)")
-        print("2. 🇺🇸 Dólares (USD)")
-        print("3. 🇪🇺 Euros (EUR)")
-        opcion_moneda = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de la factura: {self.COLOR_RESET}").strip()
-        
-        moneda_map = {'1': 'VES', '2': 'USD', '3': 'EUR'}
-        moneda = moneda_map.get(opcion_moneda, 'VES')
-        
-        # Mostrar tasa actual si es USD
-        if moneda == 'USD':
-            if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
-                tasa = self.venta_service.tasa_service.obtener_tasa_del_dia('USD')
-                if tasa:
-                    print(f"\n{self.COLOR_VERDE}💱 Tasa de cambio actual: 1 USD = {tasa:.2f} VES{self.COLOR_RESET}")
-                else:
-                    print(f"\n{self.COLOR_AMARILLO}⚠️ No hay tasa registrada. Se solicitará al momento de la venta.{self.COLOR_RESET}")
+        # Obtener tasas actuales
+        tasas_actuales = self.obtener_tasas_actuales()
+        tasa_usd = tasas_actuales.get('USD', 0)
         
         # ===== MONEDA DE PAGO =====
         print("\n" + "="*60)
         print("💳 MONEDA DE PAGO")
         print("="*60)
-        print("1. Misma moneda de la factura")
-        print("2. Dólares (USD)")
-        print("3. Bolívares (VES)")
+        print("1. Dólares (USD)")
+        print("2. Bolívares (VES)")
+        print("3. Euros (EUR)")
         opcion_pago = input(f"{self.COLOR_AMARILLO}🔹 Seleccione moneda de pago: {self.COLOR_RESET}").strip()
         
-        moneda_pago_map = {'1': moneda, '2': 'USD', '3': 'VES'}
-        moneda_pago = moneda_pago_map.get(opcion_pago, moneda)
+        moneda_pago_map = {'1': 'USD', '2': 'VES', '3': 'EUR'}
+        moneda_pago = moneda_pago_map.get(opcion_pago, 'USD')
         
         # ===== DATOS DEL COMPROBANTE =====
         print("\n" + "="*60)
@@ -2724,46 +2864,56 @@ class SistemaVentas:
         print("\n" + "="*50)
         print("🛒 AGREGAR PRODUCTOS")
         print("="*50)
+        print(f"{self.COLOR_VERDE}💡 Use '?' para ver lista, '*' para búsqueda avanzada{self.COLOR_RESET}")
+        print(f"{self.COLOR_AMARILLO}💰 Tasa USD actual: Bs. {tasa_usd:.2f}{self.COLOR_RESET}")
         
         while True:
             print("\n--- Agregar producto ---")
-            codigo = input("Código del artículo (0 para terminar, '?' para ver lista): ").lower()
+            entrada = input("Código/PLU (0=terminar, ?=lista, *=búsqueda): ").lower()
             
-            if codigo == '0':
+            if entrada == '0':
                 break
-            elif codigo == '?':
+            elif entrada == '?':
                 self._mostrar_lista_articulos()
                 continue
+            elif entrada == '*':
+                art = self._buscar_articulo_para_venta()
+                if not art:
+                    continue
+            else:
+                art = self.articulo_service.buscar_por_codigo(entrada)
+                if not art:
+                    art = self.articulo_service.buscar_por_codigo_barras(entrada)
             
-            art = self.articulo_service.buscar_por_codigo(codigo)
             if not art:
-                try:
-                    idart = int(codigo)
-                    art = self.articulo_service.obtener_por_id(idart)
-                except:
-                    pass
-            
-            if not art:
-                print("❌ Artículo no encontrado. Use '?' para ver la lista.")
+                print(f"{self.COLOR_ROJO}❌ Artículo no encontrado. Use '*' para búsqueda avanzada{self.COLOR_RESET}")
                 continue
             
+            precio_usd = art.get('precio_venta', 0)
             stock = self.inventario_service.obtener_stock_articulo(art['idarticulo'])
-            print(f"📌 Artículo: {art['nombre']} - Stock disponible: {stock} unidades")
+            
+            print(f"📌 Artículo: {art['nombre']}")
+            print(f"   Precio: ${precio_usd:.2f} USD")
+            print(f"   Stock: {stock} und")
             
             try:
-                cantidad = int(input("Cantidad: "))
-                if cantidad > stock:
-                    print(f"❌ Stock insuficiente. Solo hay {stock} unidades")
+                if art.get('tipo_medida') == 'PESO':
+                    cantidad = float(input("Cantidad (kg): "))
+                else:
+                    cantidad = int(input("Cantidad (unidades): "))
+                
+                if cantidad > stock and art.get('tipo_medida') != 'PESO':
+                    print(f"❌ Stock insuficiente")
                     continue
-                precio = float(input("Precio unitario: "))
             except:
-                print("❌ Cantidad o precio inválido")
+                print("❌ Cantidad inválida")
                 continue
             
             detalle.append({
                 'idarticulo': art['idarticulo'],
                 'cantidad': cantidad,
-                'precio_venta': precio
+                'precio_venta': precio_usd,
+                'nombre': art['nombre']
             })
             print(f"✅ {art['nombre']} agregado")
         
@@ -2772,49 +2922,19 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # ===== RESUMEN DE VENTA =====
+        # ===== RESUMEN =====
+        total_usd = sum(item['cantidad'] * item['precio_venta'] for item in detalle)
+        iva_usd = total_usd * 0.16
+        total_con_iva_usd = total_usd + iva_usd
+        total_bs = total_con_iva_usd * tasa_usd
+        
         print("\n" + "="*50)
         print("📋 RESUMEN DE VENTA")
         print("="*50)
-        
-        if opcion_ident == '1' and cliente:
-            print(f"Tipo: FACTURA CON RIF")
-            print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
-            print(f"RIF: {cliente['tipo_documento']}-{cliente['num_documento']}")
-        elif opcion_ident == '2' and cliente:
-            print(f"Tipo: FACTURA CON CÉDULA")
-            print(f"Cliente: {cliente['nombre']} {cliente['apellidos']}")
-            print(f"Cédula: {cliente['tipo_documento']}-{cliente['num_documento']}")
-        else:
-            print(f"Tipo: {tipo_comprobante} - CONSUMIDOR FINAL")
-            print("Cliente: No identificado")
-            print(f"ℹ️ {MENSAJES_LEGALES['consumidor_final']}")
-        
-        print(f"Moneda factura: {moneda}")
-        print(f"Moneda pago: {moneda_pago}")
-        print(f"Comprobante: {tipo_comprobante} {serie}-{numero}")
-        print("\nProductos:")
-        
-        total = 0
         for item in detalle:
-            art = self.articulo_service.obtener_por_id(item['idarticulo'])
-            subtotal = item['cantidad'] * item['precio_venta']
-            total += subtotal
-            print(f"  - {art['nombre']}: {item['cantidad']} x {item['precio_venta']:.2f} = {subtotal:.2f}")
-        
-        iva_total = total * 0.16
-        total_con_iva = total + iva_total
-        
-        print(f"\n💰 SUBTOTAL: Bs. {total:.2f}")
-        print(f"💰 IVA (16%): Bs. {iva_total:.2f}")
-        
-        if moneda == 'USD':
-            print(f"💰 TOTAL: ${total_con_iva:.2f} USD")
-        elif moneda == 'EUR':
-            print(f"💰 TOTAL: €{total_con_iva:.2f} EUR")
-        else:
-            print(f"💰 TOTAL: Bs. {total_con_iva:.2f}")
-        
+            print(f"  - {item['nombre']}: {item['cantidad']} x ${item['precio_venta']:.2f} = ${item['cantidad'] * item['precio_venta']:.2f}")
+        print(f"\n💰 TOTAL USD: ${total_con_iva_usd:.2f}")
+        print(f"💰 TOTAL Bs.: Bs. {total_bs:.2f} (tasa {tasa_usd:.2f})")
         print("="*50)
         
         confirmar = input(f"{self.COLOR_AMARILLO}¿Confirmar venta? (s/N): {self.COLOR_RESET}").lower()
@@ -2822,12 +2942,8 @@ class SistemaVentas:
             print("Operación cancelada")
             self.pausa()
             return
-
-        # DEBUG - Verificar valor de moneda
-        print(f"🔍 DEBUG - Valor de moneda antes de registrar: {moneda}")
-        print(f"🔍 DEBUG - Valor de moneda_pago: {moneda_pago}")
         
-        # ===== REGISTRAR VENTA =====
+        # ===== REGISTRAR =====
         idventa = self.venta_service.registrar(
             usuario['idtrabajador'], 
             idcliente,
@@ -2836,48 +2952,18 @@ class SistemaVentas:
             numero, 
             16.0,
             detalle,
-            moneda=moneda,
-            moneda_pago=moneda_pago
+            moneda='USD',
+            moneda_pago=moneda_pago,
+            tasa_cambio=tasa_usd
         )
         
         if idventa:
             print(f"\n{self.COLOR_VERDE}✅ Venta #{idventa} registrada correctamente{self.COLOR_RESET}")
-            print("="*50)
-            print("🎫 DATOS DE LA FACTURA:")
-            print(f"   Número: {tipo_comprobante} {serie}-{numero}")
-            
-            if opcion_ident == '1' and cliente:
-                print(f"   Cliente: {cliente['nombre']} {cliente['apellidos']}")
-                print(f"   RIF: {cliente['tipo_documento']}-{cliente['num_documento']}")
-            elif opcion_ident == '2' and cliente:
-                print(f"   Cliente: {cliente['nombre']} {cliente['apellidos']}")
-                print(f"   Cédula: {cliente['tipo_documento']}-{cliente['num_documento']}")
-            else:
-                print("   Cliente: CONSUMIDOR FINAL")
-                print("   Identificación: No aplica")
-            
-            if moneda == 'USD':
-                print(f"   Total: ${total_con_iva:.2f} USD")
-            elif moneda == 'EUR':
-                print(f"   Total: €{total_con_iva:.2f} EUR")
-            else:
-                print(f"   Total: Bs. {total_con_iva:.2f}")
-            
-            print(f"   Moneda pago: {moneda_pago}")
-            print(f"   {MENSAJES_LEGALES['factura_digital']}")
-            print("="*50)
-            
-            # Preguntar si desea imprimir factura
-            imprimir = input(f"\n{self.COLOR_AMARILLO}¿Desea imprimir la factura? (s/N): {self.COLOR_RESET}").lower()
-            if imprimir == 's':
-                self._imprimir_factura(idventa)
-            
-            tipo_cliente = "CONSUMIDOR FINAL" if not idcliente else "CLIENTE IDENTIFICADO"
             self.registrar_auditoria(
                 accion="CREAR",
                 tabla="venta",
                 registro_id=idventa,
-                datos_nuevos=f"Venta #{idventa} - {tipo_cliente} - Total: {total_con_iva:.2f} {moneda}"
+                datos_nuevos=f"Venta #{idventa} - Total: ${total_con_iva_usd:.2f} (Bs. {total_bs:.2f})"
             )
         else:
             print(f"\n{self.COLOR_ROJO}❌ Error al registrar la venta{self.COLOR_RESET}")
@@ -3033,11 +3119,8 @@ class SistemaVentas:
                 return self._registrar_venta()
 
     def _continuar_venta_consumidor_final(self, usuario):
-        """Continúa con venta a consumidor final (compatible Windows/Linux)"""
-        import platform
-        sistema = platform.system()
-        atajo = "F8" if sistema == "Windows" else "1"
-        print(f"\n{self.COLOR_VERDE}🛒 Venta a CONSUMIDOR FINAL (Atajo {atajo}){self.COLOR_RESET}")
+        """Continúa con venta a consumidor final"""
+        print(f"\n{self.COLOR_VERDE}🛒 Venta a CONSUMIDOR FINAL{self.COLOR_RESET}")
         idcliente = None
         cliente = None
         opcion_ident = '3'
@@ -3055,14 +3138,25 @@ class SistemaVentas:
         self.menu_ventas()
     
     def _mostrar_lista_articulos(self):
-        """Muestra lista de artículos disponibles"""
+        """Muestra lista de artículos disponibles con precios"""
         articulos = self.articulo_service.listar()
-        print("\n📋 ARTÍCULOS DISPONIBLES:")
-        print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'STOCK':<10}")
-        print("-" * 60)
+        print("\n" + "="*107)
+        print("📋 LISTADO DE ARTÍCULOS DISPONIBLES")
+        print("="*107)
+        print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'PRECIO $':<12} {'STOCK':<10}")
+        print("-" * 107)
         for a in articulos:
             stock = self.inventario_service.obtener_stock_articulo(a['idarticulo'])
-            print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {stock} und")
+            precio = float(a.get('precio_venta', 0))
+            
+            # Formatear precio
+            if precio == int(precio):
+                precio_str = f"${int(precio)}"
+            else:
+                precio_str = f"${precio:.2f}".rstrip('0').rstrip('.')
+            
+            print(f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a.get('categoria', 'N/A'):<20} {precio_str:<12} {stock} und")
+        print("-" * 107)
 
     # ======================================================
     # NUEVOS MÉTODOS DE BÚSQUEDA PARA VENTAS
@@ -3070,7 +3164,7 @@ class SistemaVentas:
     
     def _buscar_articulo_para_venta(self):
         """
-        NUEVO: Menú de búsqueda de artículos durante la venta
+        Menú de búsqueda de artículos durante la venta
         """
         self.mostrar_cabecera("🔍 BUSCAR ARTÍCULO")
         
@@ -3083,15 +3177,22 @@ class SistemaVentas:
         opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
         
         if opcion == '1':
-            codigo = input("Escanee el código de barras: ").strip()
+            codigo = input("Ingrese código de barras: ").strip()
             return self._buscar_articulo_por_codigo(codigo)
         
         elif opcion == '2':
             codigo = input("Ingrese código manual: ").strip()
-            return self._buscar_articulo_por_codigo(codigo)
+            art = self.articulo_service.buscar_por_codigo(codigo)
+            if not art:
+                art = self.articulo_service.buscar_por_codigo_barras(codigo)
+            if art:
+                return art
+            print(f"{self.COLOR_ROJO}❌ Artículo no encontrado{self.COLOR_RESET}")
+            return None
         
         elif opcion == '3':
-            termino = input("Ingrese nombre del artículo: ").strip()
+            termino = input("Ingrese nombre: ").strip()
+            # CORREGIDO: usar _buscar_articulo_por_nombre en lugar de _buscar_por_nombre
             return self._buscar_articulo_por_nombre(termino)
         
         else:
@@ -3116,7 +3217,7 @@ class SistemaVentas:
     
     def _procesar_codigo_balanza(self, codigo):
         """
-        NUEVO: Procesa códigos de balanza (prefijo 21)
+        Procesa códigos de balanza (prefijo 21)
         """
         try:
             # Extraer PLU (posiciones 3-7)
@@ -3134,8 +3235,9 @@ class SistemaVentas:
                 resultado = articulo.copy()
                 
                 if articulo.get('es_pesado'):
-                    precio_calculado = articulo.get('precio_por_kilo', 0) * peso_kg
-                    resultado['precio_venta'] = precio_calculado
+                    precio_por_kilo = float(articulo.get('precio_por_kilo', 0))
+                    precio_calculado = precio_por_kilo * peso_kg
+                    resultado['precio_calculado'] = precio_calculado
                     resultado['cantidad'] = peso_kg
                     resultado['unidad'] = 'kg'
                     print(f"✅ {articulo['nombre']} - {peso_kg:.3f} kg")
@@ -4257,7 +4359,7 @@ class SistemaVentas:
             
             # Imprimir línea con formato corregido
             print(f"{fecha_formateada:<12} {det['ventas']:<8} {bs_str:>14} bs {usd_str:>10} $ {eur_str:>8} €")
-    
+
     def _exportar_reporte(self):
         """Exporta reporte a CSV"""
         self.mostrar_cabecera("📥 EXPORTAR REPORTE")
@@ -4293,39 +4395,98 @@ class SistemaVentas:
             logger.error(f"Error exportando reporte: {e}")
             print(f"{self.COLOR_ROJO}❌ Error al exportar reporte{self.COLOR_RESET}")
         
-        self.pausa()
+        self.pausa()    
+
+    # ======================================================
+    # NUEVOS MÉTODOS PARA MODIFICAR TASAS DE CAMBIO
+    # ======================================================
     
-    def _exportar_reporte(self):
-        """Exporta reporte a CSV"""
-        self.mostrar_cabecera("📥 EXPORTAR REPORTE")
+    def _modificar_tasas(self):
+        """Permite modificar las tasas de cambio USD y EUR manualmente"""
+        self.mostrar_cabecera("💱 MODIFICAR TASAS DE CAMBIO")
         
-        print("Seleccione período a exportar:")
-        print("1. Diario")
-        print("2. Semanal")
-        print("3. Mensual")
-        print("4. Trimestral")
-        print("5. Anual")
-        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
-        
-        if opcion == '1':
-            datos = self.reporte_service.reporte_diario()
-        elif opcion == '2':
-            datos = self.reporte_service.reporte_semanal()
-        elif opcion == '3':
-            datos = self.reporte_service.reporte_mensual()
-        elif opcion == '4':
-            datos = self.reporte_service.reporte_trimestral()
-        elif opcion == '5':
-            datos = self.reporte_service.reporte_anual()
-        else:
-            print("❌ Opción no válida")
+        usuario = self.trabajador_service.get_usuario_actual()
+        if not usuario:
+            print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión para modificar tasas{self.COLOR_RESET}")
             self.pausa()
             return
         
-        ruta = self.reporte_service.exportar_a_csv(datos)
-        print(f"\n{self.COLOR_VERDE}✅ Reporte exportado a: {ruta}{self.COLOR_RESET}")
-        print("   Puede abrirlo con Excel para análisis contable")
-        self.pausa()
+        print("Tasas actuales:")
+        
+        # Obtener tasas actuales
+        tasas_actuales = self.obtener_tasas_actuales()
+        
+        if tasas_actuales['USD']:
+            print(f"  💵 USD: 1 = {self.COLOR_VERDE}Bs. {tasas_actuales['USD']:.2f}{self.COLOR_RESET}")
+        else:
+            print(f"  💵 USD: {self.COLOR_ROJO}No registrada{self.COLOR_RESET}")
+        
+        if tasas_actuales['EUR']:
+            print(f"  💶 EUR: 1 = {self.COLOR_VERDE}Bs. {tasas_actuales['EUR']:.2f}{self.COLOR_RESET}")
+        else:
+            print(f"  💶 EUR: {self.COLOR_ROJO}No registrada{self.COLOR_RESET}")
+        
+        print("\n" + "="*60)
+        print("¿Qué tasa desea modificar?")
+        print("1. 💵 Dólar (USD)")
+        print("2. 💶 Euro (EUR)")
+        print("3. Ambas")
+        print("0. Volver")
+        
+        opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip()
+        
+        if opcion == '1':
+            self._modificar_tasa_unica('USD', usuario)
+            self.pausa()
+        elif opcion == '2':
+            self._modificar_tasa_unica('EUR', usuario)
+            self.pausa()
+        elif opcion == '3':
+            self._modificar_tasa_unica('USD', usuario)
+            self._modificar_tasa_unica('EUR', usuario)
+            self.pausa()
+        elif opcion == '0':
+            return
+        else:
+            print("❌ Opción no válida")
+            self.pausa()
+    
+    def _modificar_tasa_unica(self, moneda, usuario):
+        """Modifica una tasa específica"""
+        print(f"\n{self.COLOR_AMARILLO}💰 Modificar tasa {moneda}{self.COLOR_RESET}")
+        print("="*40)
+        
+        try:
+            nueva_tasa = float(input(f"Nuevo valor para 1 {moneda} = Bs. ").strip())
+            if nueva_tasa <= 0:
+                print("❌ La tasa debe ser positiva")
+                return
+            
+            # Registrar en el servicio de tasas
+            if hasattr(self.venta_service, 'tasa_service') and self.venta_service.tasa_service:
+                nombre_usuario = f"{usuario['nombre']} {usuario['apellidos']}"
+                
+                if self.venta_service.tasa_service.registrar_tasa_manual(
+                    moneda=moneda,
+                    tasa=nueva_tasa,
+                    usuario=nombre_usuario
+                ):
+                    print(f"{self.COLOR_VERDE}✅ Tasa {moneda} actualizada a Bs. {nueva_tasa:.2f}{self.COLOR_RESET}")
+                    
+                    # Registrar en auditoría
+                    self.registrar_auditoria(
+                        accion="MODIFICAR_TASA",
+                        tabla="tasa_cambio",
+                        registro_id=0,
+                        datos_nuevos=f"Tasa {moneda} actualizada a {nueva_tasa}"
+                    )
+                else:
+                    print(f"{self.COLOR_ROJO}❌ Error al actualizar tasa{self.COLOR_RESET}")
+            else:
+                print(f"{self.COLOR_ROJO}❌ Servicio de tasas no disponible{self.COLOR_RESET}")
+                
+        except ValueError:
+            print("❌ Ingrese un número válido")
     
     def _ver_stock_completo(self):
         self.mostrar_cabecera("STOCK COMPLETO")
@@ -4559,6 +4720,11 @@ class SistemaVentas:
         
         while True:
             opcion = self.mostrar_menu_principal()
+            
+            # NUEVA OPCIÓN PARA MODIFICAR TASAS
+            if opcion.upper() == 'X':
+                self._modificar_tasas()
+                continue
             
             if opcion == '1':
                 if self.rol_service.tiene_permiso('clientes_ver'):
