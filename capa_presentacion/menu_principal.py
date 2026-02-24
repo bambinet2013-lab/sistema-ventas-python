@@ -337,12 +337,14 @@ class SistemaVentas:
             opciones.append(("3", "Gestión de Proveedores", "🏢"))
         if not usuario or self.rol_service.tiene_permiso('ventas_ver'):
             opciones.append(("4", "Gestión de Ventas", "💰"))
+        if not usuario or self.rol_service.tiene_permiso('compras_ver'):  # NUEVA OPCIÓN
+            opciones.append(("5", "Gestión de Compras", "📥"))              # NUEVA OPCIÓN
         if not usuario or self.rol_service.tiene_permiso('inventario_ver'):
-            opciones.append(("5", "Gestión de Inventario", "📊"))
+            opciones.append(("6", "Gestión de Inventario", "📊"))
         if not usuario or self.rol_service.tiene_permiso('reportes_ventas'):
-            opciones.append(("6", "Reportes Contables", "📈"))
+            opciones.append(("7", "Reportes Contables", "📈"))
         if usuario and self.rol_service.tiene_permiso('usuarios_ver'):
-            opciones.append(("7", "Administración de Usuarios", "👤"))
+            opciones.append(("8", "Administración de Usuarios", "👤"))
         
         for num, desc, icono in opciones:
             linea_opcion = f"   {icono} {num}. {desc}"
@@ -4344,36 +4346,483 @@ class SistemaVentas:
                     print("❌ No tiene permisos para acceder a ventas")
                     self.pausa()
             elif opcion == '5':
+                if self.rol_service.tiene_permiso('compras_ver'):
+                    self._menu_compras()
+                else:
+                    print("❌ No tiene permisos para acceder a compras")
+                    self.pausa()
+            elif opcion == '6':
                 if self.rol_service.tiene_permiso('inventario_ver'):
                     self.menu_inventario()
                 else:
                     print("❌ No tiene permisos para acceder a inventario")
                     self.pausa()
-            elif opcion == '6':
+            elif opcion == '7':
                 if self.rol_service.tiene_permiso('reportes_ventas'):
                     self.menu_reportes()
                 else:
                     print("❌ No tiene permisos para acceder a reportes")
                     self.pausa()
-            elif opcion == '7':
+            elif opcion == '8':
+                if self.trabajador_service.get_usuario_actual():
+                    # Si ya tiene sesión, cierra sesión
+                    self.trabajador_service.logout()
+                    print(f"{self.COLOR_VERDE}✅ Sesión cerrada{self.COLOR_RESET}")
+                    self.pausa()
+                else:
+                    # Si no tiene sesión, inicia sesión
+                    self.menu_login()
+            elif opcion == '9':
                 if self.trabajador_service.get_usuario_actual() and self.rol_service.tiene_permiso('usuarios_ver'):
                     self.menu_administracion_usuarios()
                 else:
-                    print("❌ No tiene permisos para acceder a esta opción")
+                    print("❌ No tiene permisos para acceder a usuarios")
                     self.pausa()
-            elif opcion == '8':
-                if self.trabajador_service.get_usuario_actual():
-                    self.trabajador_service.logout()
-                    self.pausa()
-                else:
-                    self.menu_login()
             elif opcion == '0':
                 print(f"\n{self.COLOR_VERDE}👋 ¡Hasta luego!{self.COLOR_RESET}")
                 break
             else:
                 print("❌ Opción no válida")
                 self.pausa()
+
+    # ======================================================
+    # MÓDULO DE COMPRAS
+    # ======================================================
+    
+        """Menú de gestión de compras"""
+    def _menu_compras(self):
+        """Menú de gestión de compras"""
+        while True:
+            self.mostrar_cabecera("📥 MÓDULO DE COMPRAS")
+            print(f"{self.COLOR_VERDE}1{self.COLOR_RESET}. Registrar compra (orden)")
+            print(f"{self.COLOR_VERDE}2{self.COLOR_RESET}. Recibir mercancía")
+            print(f"{self.COLOR_VERDE}3{self.COLOR_RESET}. Listar compras")
+            print(f"{self.COLOR_VERDE}4{self.COLOR_RESET}. Buscar compra")
+            print(f"{self.COLOR_VERDE}5{self.COLOR_RESET}. Reportes de compras")
+            print(f"{self.COLOR_ROJO}0{self.COLOR_RESET}. Volver al menú principal")
+            
+            opcion = input(f"\n{self.COLOR_AMARILLO}Seleccione: {self.COLOR_RESET}")
+            
+            if opcion == '1':
+                self._registrar_compra()
+            elif opcion == '2':
+                self._recibir_mercancia()
+            elif opcion == '3':
+                self._listar_compras()
+            elif opcion == '4':
+                self._buscar_compra()
+            elif opcion == '5':
+                self._reportes_compras()
+            elif opcion == '0':
+                break
+            else:
+                print(f"{self.COLOR_ROJO}❌ Opción inválida{self.COLOR_RESET}")
+                self.pausa()
+
+    def _registrar_compra(self):
+        """Registra una nueva compra"""
+        self.mostrar_cabecera("📥 REGISTRAR COMPRA")
         
+        # Verificar usuario
+        usuario = self.trabajador_service.get_usuario_actual()
+        if not usuario:
+            print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # Buscar proveedor
+        print(f"\n{self.COLOR_AMARILLO}🔍 BUSCAR PROVEEDOR{self.COLOR_RESET}")
+        print("1. Buscar por RIF")
+        print("2. Buscar por nombre")
+        print("3. Listar todos")
+        print(f"{self.COLOR_ROJO}0. Volver{self.COLOR_RESET}")
+        
+        opcion = input(f"\nSeleccione: ")
+        
+        if opcion == '0':
+            return  # Simplemente regresa al menú anterior
+            
+        proveedor = None
+        
+        try:
+            if opcion == '1':
+                rif = input("RIF: ").upper()
+                proveedor = self.proveedor_service.buscar_por_rif(rif)
+                if not proveedor:
+                    print(f"{self.COLOR_ROJO}❌ Proveedor no encontrado{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+            elif opcion == '2':
+                nombre = input("Nombre/Razón social: ")
+                proveedores = self.proveedor_service.buscar_por_nombre(nombre)
+                if proveedores:
+                    print(f"\n{self.COLOR_VERDE}Proveedores encontrados:{self.COLOR_RESET}")
+                    for i, p in enumerate(proveedores[:10], 1):
+                        print(f"{i}. {p['razon_social']} - {p['rif']}")
+                    print(f"{self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+                    
+                    try:
+                        idx = int(input("\nSeleccione: ")) - 1
+                        if idx == -1:  # Usuario presionó 0
+                            return
+                        proveedor = proveedores[idx]
+                    except (ValueError, IndexError):
+                        print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+                        self.pausa()
+                        return
+                else:
+                    print(f"{self.COLOR_ROJO}❌ No se encontraron proveedores{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+            elif opcion == '3':
+                proveedores = self.proveedor_service.listar_todos()
+                if proveedores:
+                    print(f"\n{self.COLOR_VERDE}Proveedores:{self.COLOR_RESET}")
+                    for i, p in enumerate(proveedores[:10], 1):
+                        print(f"{i}. {p['razon_social']} - {p['rif']}")
+                    print(f"{self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+                    
+                    try:
+                        idx = int(input("\nSeleccione: ")) - 1
+                        if idx == -1:  # Usuario presionó 0
+                            return
+                        proveedor = proveedores[idx]
+                    except (ValueError, IndexError):
+                        print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+                        self.pausa()
+                        return
+                else:
+                    print(f"{self.COLOR_ROJO}❌ No hay proveedores registrados{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+            else:
+                print(f"{self.COLOR_ROJO}❌ Opción inválida{self.COLOR_RESET}")
+                self.pausa()
+                return
+                
+        except (ValueError, IndexError) as e:
+            print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        if not proveedor:
+            print(f"{self.COLOR_ROJO}❌ Proveedor no válido{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        print(f"{self.COLOR_VERDE}✅ Proveedor: {proveedor['razon_social']}{self.COLOR_RESET}")
+        
+        # Resto del código para continuar con la compra...
+        print(f"\n{self.COLOR_AMARILLO}⏳ Función en desarrollo...{self.COLOR_RESET}")
+        self.pausa()
+
+    def _listar_compras(self):
+        """Lista todas las compras"""
+        self.mostrar_cabecera("📋 LISTADO DE COMPRAS")
+        
+        try:
+            from capa_negocio.compra_service import CompraService
+            compra_service = CompraService()
+            compras = compra_service.listar_compras()
+            
+            if not compras:
+                print(f"\n{self.COLOR_AMARILLO}📭 No hay compras registradas{self.COLOR_RESET}")
+            else:
+                print(f"\n{self.COLOR_VERDE}Total de compras: {len(compras)}{self.COLOR_RESET}\n")
+                for compra in compras[:20]:
+                    print(f"ID: {compra['idcompra']}")
+                    print(f"Fecha: {compra['fecha_hora']}")
+                    print(f"Proveedor: {compra['proveedor']}")
+                    print(f"Comprobante: {compra['tipo_comprobante']} {compra['serie']}-{compra['numero_comprobante']}")
+                    print(f"Total: Bs. {compra['total']:,.2f}")
+                    print(f"Estado: {compra['estado']}")
+                    print("-" * 40)
+        except Exception as e:
+            logger.error(f"Error en listado de compras: {e}")
+            print(f"\n{self.COLOR_ROJO}❌ Error al cargar compras{self.COLOR_RESET}")
+        
+        self.pausa()
+
+    def _buscar_compra(self):
+        """Busca una compra por ID"""
+        self.mostrar_cabecera("🔍 BUSCAR COMPRA")
+        
+        print(f"\n{self.COLOR_AMARILLO}Ingrese el ID de la compra (0 para cancelar):{self.COLOR_RESET}")
+        
+        try:
+            id_input = input("ID de la compra: ").strip()
+            
+            if id_input == '0':
+                print(f"{self.COLOR_AMARILLO}Búsqueda cancelada{self.COLOR_RESET}")
+                self.pausa()
+                return
+                
+            if not id_input:
+                print(f"{self.COLOR_ROJO}❌ ID no válido{self.COLOR_RESET}")
+                self.pausa()
+                return
+                
+            idcompra = int(id_input)
+            
+        except ValueError:
+            print(f"{self.COLOR_ROJO}❌ ID inválido (debe ser un número){self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        try:
+            from capa_negocio.compra_service import CompraService
+            compra_service = CompraService()
+            compra = compra_service.buscar_compra(idcompra)
+            
+            if not compra:
+                print(f"\n{self.COLOR_ROJO}❌ Compra #{idcompra} no encontrada{self.COLOR_RESET}")
+            else:
+                print(f"\n{self.COLOR_VERDE}📋 COMPRA #{compra['idcompra']}{self.COLOR_RESET}")
+                print(f"Fecha: {compra['fecha_hora']}")
+                print(f"Proveedor: {compra['proveedor']} - {compra['rif']}")
+                print(f"Trabajador: {compra['trabajador']}")
+                print(f"Comprobante: {compra['tipo_comprobante']} {compra['serie']}-{compra['numero_comprobante']}")
+                print(f"Subtotal: Bs. {compra['subtotal']:,.2f}")
+                print(f"IVA: Bs. {compra['iva']:,.2f}")
+                print(f"Total: Bs. {compra['total']:,.2f}")
+                print(f"Estado: {compra['estado']}")
+                
+                if compra.get('detalles'):
+                    print(f"\n{self.COLOR_VERDE}📦 DETALLES:{self.COLOR_RESET}")
+                    for d in compra['detalles']:
+                        print(f"  • {d['articulo']} - {d['cantidad']} x Bs. {d['precio_compra']:,.2f} = Bs. {d['subtotal']:,.2f}")
+        except Exception as e:
+            logger.error(f"Error buscando compra: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al buscar la compra{self.COLOR_RESET}")
+        
+        self.pausa()
+
+    def _reportes_compras(self):
+        """Reportes de compras"""
+        self.mostrar_cabecera("📊 REPORTES DE COMPRAS")
+        print(f"{self.COLOR_AMARILLO}⏳ Reportes en desarrollo...{self.COLOR_RESET}")
+        self.pausa()
+        
+    def _recibir_mercancia(self):
+        """Registra recepción de mercancía"""
+        self.mostrar_cabecera("📦 RECIBIR MERCANCÍA")
+        
+        # Verificar usuario
+        usuario = self.trabajador_service.get_usuario_actual()
+        if not usuario:
+            print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # Buscar proveedor
+        print(f"\n{self.COLOR_AMARILLO}🔍 BUSCAR PROVEEDOR{self.COLOR_RESET}")
+        print("1. Buscar por RIF")
+        print("2. Buscar por nombre")
+        print("3. Listar todos")
+        print(f"{self.COLOR_ROJO}0. Volver{self.COLOR_RESET}")
+        
+        opcion = input(f"\nSeleccione: ")
+        
+        if opcion == '0':
+            return  # Regresa al menú anterior
+            
+        proveedor = None
+        
+        try:
+            if opcion == '1':
+                rif = input("RIF: ").upper()
+                if not rif:
+                    return
+                proveedor = self.proveedor_service.buscar_por_rif(rif)
+                if not proveedor:
+                    print(f"{self.COLOR_ROJO}❌ Proveedor no encontrado{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+            elif opcion == '2':
+                nombre = input("Nombre/Razón social: ")
+                if not nombre:
+                    return
+                proveedores = self.proveedor_service.buscar_por_nombre(nombre)
+                if proveedores:
+                    print(f"\n{self.COLOR_VERDE}Proveedores encontrados:{self.COLOR_RESET}")
+                    for i, p in enumerate(proveedores[:10], 1):
+                        print(f"{i}. {p['razon_social']} - {p['rif']}")
+                    print(f"{self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+                    
+                    try:
+                        idx = int(input("\nSeleccione: ")) - 1
+                        if idx == -1:  # Usuario presionó 0
+                            return
+                        proveedor = proveedores[idx]
+                    except (ValueError, IndexError):
+                        print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+                        self.pausa()
+                        return
+                else:
+                    print(f"{self.COLOR_ROJO}❌ No se encontraron proveedores{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+            elif opcion == '3':
+                proveedores = self.proveedor_service.listar_todos()
+                if proveedores:
+                    print(f"\n{self.COLOR_VERDE}Proveedores:{self.COLOR_RESET}")
+                    for i, p in enumerate(proveedores[:10], 1):
+                        print(f"{i}. {p['razon_social']} - {p['rif']}")
+                    print(f"{self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+                    
+                    try:
+                        idx = int(input("\nSeleccione: ")) - 1
+                        if idx == -1:  # Usuario presionó 0
+                            return
+                        proveedor = proveedores[idx]
+                    except (ValueError, IndexError):
+                        print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+                        self.pausa()
+                        return
+                else:
+                    print(f"{self.COLOR_ROJO}❌ No hay proveedores registrados{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+            else:
+                print(f"{self.COLOR_ROJO}❌ Opción inválida{self.COLOR_RESET}")
+                self.pausa()
+                return
+                
+        except Exception as e:
+            print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        if not proveedor:
+            print(f"{self.COLOR_ROJO}❌ Proveedor no válido{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        print(f"{self.COLOR_VERDE}✅ Proveedor: {proveedor['razon_social']}{self.COLOR_RESET}")
+        
+        # Preguntar si tiene orden de compra
+        print(f"\n{self.COLOR_AMARILLO}📄 ¿TIENE ORDEN DE COMPRA?{self.COLOR_RESET}")
+        print("1. Sí, tengo orden de compra")
+        print("2. No, es recepción directa")
+        print(f"{self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+        
+        opcion_orden = input(f"\nSeleccione: ")
+        
+        if opcion_orden == '0':
+            return
+            
+        idcompra_original = None
+        
+        if opcion_orden == '1':
+            try:
+                idcompra = int(input("ID de la orden de compra: "))
+                idcompra_original = idcompra
+                print(f"{self.COLOR_VERDE}✅ Usando orden #{idcompra}{self.COLOR_RESET}")
+            except ValueError:
+                print(f"{self.COLOR_AMARILLO}Continuando sin orden...{self.COLOR_RESET}")
+        elif opcion_orden == '2':
+            print(f"{self.COLOR_VERDE}✅ Recepción directa{self.COLOR_RESET}")
+        else:
+            print(f"{self.COLOR_ROJO}❌ Opción inválida{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        observaciones = input("\nObservaciones (opcional): ")
+        
+        # Ingresar items recibidos
+        items = []
+        print(f"\n{self.COLOR_AMARILLO}📦 INGRESAR PRODUCTOS RECIBIDOS{self.COLOR_RESET}")
+        print("(Presione Enter sin código para terminar)")
+        
+        while True:
+            codigo = input("\nCódigo de barras o PLU (0 para cancelar): ")
+            if not codigo:
+                break
+            if codigo == '0':
+                if items:
+                    print(f"{self.COLOR_AMARILLO}¿Cancelar recepción?{self.COLOR_RESET}")
+                    confirmar = input("S/N: ").upper()
+                    if confirmar == 'S':
+                        return
+                    else:
+                        continue
+                else:
+                    return
+            
+            articulo = self.articulo_service.buscar_por_codigo(codigo)
+            if not articulo:
+                print(f"{self.COLOR_ROJO}❌ Artículo no encontrado{self.COLOR_RESET}")
+                continue
+            
+            print(f"Producto: {articulo['nombre']}")
+            print(f"Stock actual: {articulo['stock_actual']}")
+            
+            try:
+                cantidad = int(input("Cantidad recibida: "))
+                if cantidad <= 0:
+                    print(f"{self.COLOR_ROJO}❌ Cantidad inválida{self.COLOR_RESET}")
+                    continue
+                
+                precio_usd = float(input("Costo unitario en USD: "))
+                if precio_usd <= 0:
+                    print(f"{self.COLOR_ROJO}❌ Precio inválido{self.COLOR_RESET}")
+                    continue
+                
+                lote = input("Número de lote (opcional): ") or None
+                fecha_venc = input("Fecha vencimiento (YYYY-MM-DD, opcional): ") or None
+                
+                items.append({
+                    'idarticulo': articulo['idarticulo'],
+                    'cantidad_recibida': cantidad,
+                    'costo_unitario_usd': precio_usd,
+                    'lote': lote,
+                    'fecha_vencimiento': fecha_venc
+                })
+                
+                print(f"{self.COLOR_VERDE}✅ Producto agregado{self.COLOR_RESET}")
+                
+            except ValueError:
+                print(f"{self.COLOR_ROJO}❌ Valor inválido{self.COLOR_RESET}")
+        
+        if not items:
+            print(f"{self.COLOR_ROJO}❌ No hay productos en la recepción{self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # Mostrar resumen
+        print(f"\n{self.COLOR_AMARILLO}📋 RESUMEN DE RECEPCIÓN{self.COLOR_RESET}")
+        print(f"Proveedor: {proveedor['razon_social']}")
+        print(f"Productos: {len(items)} items")
+        total_usd = sum(item['cantidad_recibida'] * item['costo_unitario_usd'] for item in items)
+        print(f"Total USD: {total_usd:.2f}")
+        
+        print(f"\n{self.COLOR_VERDE}Detalle:{self.COLOR_RESET}")
+        for item in items:
+            print(f"  • {item['cantidad_recibida']} x USD {item['costo_unitario_usd']:.2f} = USD {item['cantidad_recibida'] * item['costo_unitario_usd']:.2f}")
+        
+        confirmar = input(f"\n{self.COLOR_AMARILLO}¿Confirmar recepción? (S/N): {self.COLOR_RESET}").upper()
+        
+        if confirmar == 'S':
+            from capa_negocio.recepcion_service import RecepcionService
+            recepcion_service = RecepcionService()
+            
+            idrecepcion = recepcion_service.recibir_mercancia(
+                proveedor['idproveedor'],
+                usuario['idtrabajador'],
+                items,
+                idcompra_original,
+                observaciones if observaciones else None
+            )
+            
+            if idrecepcion:
+                print(f"{self.COLOR_VERDE}✅ Recepción #{idrecepcion} registrada exitosamente{self.COLOR_RESET}")
+            else:
+                print(f"{self.COLOR_ROJO}❌ Error registrando recepción{self.COLOR_RESET}")
+        else:
+            print(f"{self.COLOR_AMARILLO}Recepción cancelada{self.COLOR_RESET}")
+        
+        self.pausa()
+
         self.db.cerrar()
 
 if __name__ == "__main__":

@@ -2,14 +2,16 @@
 Repositorio para gestión de compras
 """
 from loguru import logger
-from capa_datos.conexion import obtener_conexion
+from capa_datos.conexion import ConexionDB
 
 class CompraRepositorio:
     def __init__(self):
-        self.conn = obtener_conexion()
+        self.db = ConexionDB()
+        self.conn = self.db.conectar()
     
     def crear(self, idproveedor, idtrabajador, tipo_comprobante, serie, numero,
               subtotal, iva, total, observaciones=None):
+        """Crea una nueva compra"""
         try:
             cursor = self.conn.cursor()
             query = """
@@ -31,6 +33,7 @@ class CompraRepositorio:
             return None
     
     def agregar_detalle(self, idcompra, idarticulo, cantidad, precio_compra, subtotal):
+        """Agrega un detalle a la compra"""
         try:
             cursor = self.conn.cursor()
             query = """
@@ -48,6 +51,7 @@ class CompraRepositorio:
             return None
     
     def listar(self):
+        """Lista todas las compras"""
         try:
             cursor = self.conn.cursor()
             query = """
@@ -68,9 +72,11 @@ class CompraRepositorio:
             return []
     
     def buscar_por_id(self, idcompra):
+        """Busca una compra por ID con sus detalles"""
         try:
             cursor = self.conn.cursor()
             
+            # Cabecera
             query = """
             SELECT c.*, p.razon_social as proveedor, p.rif,
                    t.nombre + ' ' + t.apellidos as trabajador
@@ -88,6 +94,7 @@ class CompraRepositorio:
             columns = [col[0] for col in cursor.description]
             resultado = dict(zip(columns, cabecera))
             
+            # Detalles
             query = """
             SELECT d.*, a.nombre as articulo, a.codigo_barras
             FROM detalle_compra d
@@ -106,6 +113,7 @@ class CompraRepositorio:
             return None
     
     def anular(self, idcompra):
+        """Anula una compra"""
         try:
             cursor = self.conn.cursor()
             query = "UPDATE compra SET estado = 'ANULADA' WHERE idcompra = ?"
