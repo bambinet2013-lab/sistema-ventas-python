@@ -1596,101 +1596,89 @@ class SistemaVentas:
     
     @requiere_permiso('articulos_ver')
     def _listar_articulos(self):
-        """Lista todos los artículos con opciones de edición"""
-        while True:
-            self.mostrar_cabecera("LISTADO DE ARTÍCULOS")
+        """Lista todos los artículos con su stock actual"""
+        self.mostrar_cabecera("LISTADO DE ARTÍCULOS")
+        
+        try:
+            from capa_negocio.inventario_service import InventarioService
+            inventario_service = InventarioService(self.articulo_service)
             
-            articulos_con_stock = self.inventario_service.listar_con_stock()
+            # Obtener artículos con stock
+            articulos = inventario_service.listar_con_stock()
             
-            if not articulos_con_stock:
-                print("📭 No hay artículos registrados")
+            if not articulos:
+                print(f"\n{self.COLOR_AMARILLO}📭 No hay artículos registrados{self.COLOR_RESET}")
                 self.pausa()
                 return
             
-            # Ordenar artículos por ID
-            articulos_con_stock.sort(key=lambda x: x['idarticulo'])
+            # Cabecera de la tabla
+            print(f"\n{self.COLOR_VERDE}{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'PRECIO $':<10} {'STOCK':<10} {'ESTADO':<10}{self.COLOR_RESET}")
+            print(f"{self.COLOR_CYAN}{'-'*110}{self.COLOR_RESET}")
             
-            # Cabecera con columnas
-            print(f"{'ID':<5} {'CÓDIGO':<15} {'NOMBRE':<30} {'CATEGORÍA':<20} {'PRECIO $':<12} {'STOCK':<10} {'ESTADO':<10}")
-            print("-" * 107)
-            
-            for a in articulos_con_stock:
+            for a in articulos:
+                id_art = a.get('idarticulo', '')
+                codigo = a.get('codigo_barras', '')
+                if not codigo:
+                    codigo = a.get('codigo', '') or a.get('plu', '') or 'S/C'
+                codigo = codigo[:14]
+                
+                nombre = a.get('nombre', '')[:29]
+                categoria = a.get('categoria_nombre', a.get('categoria', 'Sin categoría'))[:19]
                 precio = a.get('precio_venta', 0)
-                stock_str = f"{a['stock_actual']} und"
+                stock_actual = a.get('stock_actual', 0)
                 
-                # Formatear precio en dólares (enteros sin decimales, decimales con 2 dígitos)
-                if precio == int(precio):  # Si es entero (ej: 150.0 → 150)
-                    precio_str = f"${int(precio)}"
-                else:  # Si tiene decimales (ej: 0.60, 2.5, 4.50)
-                    # Mostrar con 2 decimales pero sin ceros innecesarios
-                    precio_str = f"${precio:.2f}".rstrip('0').rstrip('.') if precio % 1 != 0 else f"${int(precio)}"
+                # Determinar emoji según estado
+                if stock_actual <= 0:
+                    emoji = "🔴"
+                elif stock_actual <= a.get('stock_minimo', 5):
+                    emoji = "🟡"
+                else:
+                    emoji = "🟢"
                 
-                estado = f"{a['emoji']}"
+                # Formatear precio: entero sin decimales, decimal con 2 decimales
+                if precio == int(precio):
+                    precio_formateado = f"${int(precio)}"
+                else:
+                    precio_formateado = f"${precio:.2f}"
                 
-                linea = f"{a['idarticulo']:<5} {a['codigo']:<15} {a['nombre']:<30} {a['categoria']:<20} {precio_str:<12} {stock_str:<10} {estado:<10}"
-                print(f"{a['color']}{linea}{self.inventario_service.COLOR_RESET}")
+                # Formatear stock con "und"
+                stock_formateado = f"{stock_actual} und"
+                
+                print(f"{id_art:<5} {codigo:<15} {nombre:<30} {categoria:<20} {precio_formateado:<10} {stock_formateado:<10} {emoji:<10}")
             
-            print("-" * 107)
-            print("Opciones de edición:")
-            print("  [E] Editar TODO (categoría, nombre, stock) - Ingrese ID")
-            print("  [M] Editar solo PRECIO en dólares $ - Ingrese ID")
-            print("  [V] Volver al menú")
-            print("-" * 40)
+            print(f"{self.COLOR_CYAN}{'-'*110}{self.COLOR_RESET}")
+            print(f"\n{self.COLOR_AMARILLO}Opciones de edición:{self.COLOR_RESET}")
+            print(f"  {self.COLOR_VERDE}[E]{self.COLOR_RESET} Editar TODO (categoría, nombre, stock) - Ingrese ID")
+            print(f"  {self.COLOR_VERDE}[M]{self.COLOR_RESET} Editar solo PRECIO en dólares $ - Ingrese ID")
+            print(f"  {self.COLOR_ROJO}[V]{self.COLOR_RESET} Volver al menú")
+            print(f"{self.COLOR_CYAN}{'-'*40}{self.COLOR_RESET}")
             
-            opcion = input(f"{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip().upper()
+            opcion = input(f"\n{self.COLOR_AMARILLO}🔹 Seleccione: {self.COLOR_RESET}").strip().upper()
             
             if opcion == 'V':
-                break
-            
+                return
             elif opcion == 'E':
                 try:
-                    id_input = input("ID del artículo a editar (todo excepto precio): ").strip()
-                    if id_input.isdigit():
-                        id_editar = int(id_input)
-                        articulo = self.articulo_service.obtener_por_id(id_editar)
-                        if articulo:
-                            self._editar_articulo_completo(id_editar)
-                        else:
-                            print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {id_editar}{self.COLOR_RESET}")
-                            self.pausa()
-                    else:
-                        print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
-                        self.pausa()
-                except Exception as e:
-                    print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+                    id_editar = int(input("ID del artículo a editar: "))
+                    self._editar_articulo(id_editar)
+                except ValueError:
+                    print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
                     self.pausa()
-            
             elif opcion == 'M':
                 try:
-                    id_input = input("ID del artículo a editar (solo precio $): ").strip()
-                    if id_input.isdigit():
-                        id_editar = int(id_input)
-                        articulo = self.articulo_service.obtener_por_id(id_editar)
-                        if articulo:
-                            self._editar_precio_articulo(id_editar)
-                        else:
-                            print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {id_editar}{self.COLOR_RESET}")
-                            self.pausa()
-                    else:
-                        print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
-                        self.pausa()
-                except Exception as e:
-                    print(f"{self.COLOR_ROJO}❌ Error: {e}{self.COLOR_RESET}")
+                    id_precio = int(input("ID del artículo para cambiar precio: "))
+                    self._editar_precio_articulo(id_precio)
+                except ValueError:
+                    print(f"{self.COLOR_ROJO}❌ ID inválido{self.COLOR_RESET}")
                     self.pausa()
-            
-            elif opcion.isdigit():
-                # Si el usuario ingresa directamente un número, por defecto va a edición completa
-                id_editar = int(opcion)
-                articulo = self.articulo_service.obtener_por_id(id_editar)
-                if articulo:
-                    self._editar_articulo_completo(id_editar)
-                else:
-                    print(f"{self.COLOR_ROJO}❌ No existe artículo con ID {id_editar}{self.COLOR_RESET}")
-                    self.pausa()
-            
             else:
-                print(f"{self.COLOR_ROJO}❌ Opción no válida{self.COLOR_RESET}")
+                print(f"{self.COLOR_ROJO}❌ Opción inválida{self.COLOR_RESET}")
                 self.pausa()
+                
+        except Exception as e:
+            logger.error(f"Error en listado de artículos: {e}")
+            print(f"{self.COLOR_ROJO}❌ Error al listar artículos: {e}{self.COLOR_RESET}")
+            self.pausa()
 
     def _editar_precio_articulo(self, idarticulo):
         """
@@ -4509,7 +4497,7 @@ class SistemaVentas:
             
             # Aquí iría la lógica real para crear proveedor
             # Por ahora simulamos
-            print(f"\n{self.COLOR_VERDE}   ✅ Proveedor creado exitosamente{self.COLOR_RESET}")
+            print(f"\n{self.COLOR_VERDE}   ✅ Proveedor creado exitosamente (simulado){self.COLOR_RESET}")
             print(f"      RIF: {rif}")
             print(f"      Razón Social: {razon}")
             
@@ -4540,20 +4528,34 @@ class SistemaVentas:
             self.pausa()
             return
         
-        # Obtener tasa del día - CORREGIDO
+        # Obtener tasa del día - CORREGIDO DEFINITIVO
         from capa_negocio.tasa_service import TasaService
         from capa_datos.tasa_repo import TasaRepositorio
+        from capa_datos.conexion import ConexionDB
+        
         try:
-            tasa_repo = TasaRepositorio()
-            tasa_service = TasaService(tasa_repo)
-            tasa = tasa_service.obtener_tasa_del_dia('USD')
-            if tasa:
-                monto_bs = monto_usd * tasa
-                print(f"   Tasa BCV del día: {self.COLOR_VERDE}{tasa:.2f}{self.COLOR_RESET} Bs/USD")
-                print(f"   Monto en Bs: {self.COLOR_AMARILLO}{monto_bs:,.2f}{self.COLOR_RESET}")
+            # Crear conexión y repositorio de tasa
+            db_tasa = ConexionDB()
+            conn_tasa = db_tasa.conectar()
+            if conn_tasa:
+                tasa_repo = TasaRepositorio(conn_tasa)
+                tasa_service = TasaService(tasa_repo)
+                tasa = tasa_service.obtener_tasa_del_dia('USD')
+                
+                if tasa and tasa > 0:
+                    monto_bs = monto_usd * tasa
+                    print(f"   Tasa BCV del día: {self.COLOR_VERDE}{tasa:.2f}{self.COLOR_RESET} Bs/USD")
+                    print(f"   Monto en Bs: {self.COLOR_AMARILLO}{monto_bs:,.2f}{self.COLOR_RESET}")
+                else:
+                    print(f"   {self.COLOR_AMARILLO}⚠️ No se pudo obtener la tasa del día{self.COLOR_RESET}")
+                    tasa = None
+                
+                # Cerrar conexión de tasa
+                db_tasa.cerrar()
             else:
-                print(f"   {self.COLOR_AMARILLO}⚠️ No se pudo obtener la tasa del día{self.COLOR_RESET}")
+                print(f"   {self.COLOR_AMARILLO}⚠️ No se pudo conectar para obtener tasa{self.COLOR_RESET}")
                 tasa = None
+                
         except Exception as e:
             print(f"   {self.COLOR_AMARILLO}⚠️ Error al obtener tasa: {e}{self.COLOR_RESET}")
             tasa = None
@@ -4561,18 +4563,58 @@ class SistemaVentas:
         # 4. FECHA DE LA COMPRA
         print(f"\n{self.COLOR_AMARILLO}4. FECHA DE LA COMPRA{self.COLOR_RESET}")
         from datetime import datetime
-        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-        fecha_compra = input(f"   Fecha (YYYY-MM-DD) [HOY={fecha_hoy}]: ").strip()
-        if not fecha_compra:
-            fecha_compra = fecha_hoy
+        fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+        fecha_compra_input = input(f"   Fecha (DD/MM/YYYY) [HOY={fecha_hoy}]: ").strip()
         
-        # 5. FECHA ESTIMADA DE LLEGADA
+        if not fecha_compra_input:
+            fecha_compra_input = fecha_hoy
+        
+        # Convertir de DD/MM/YYYY a YYYY-MM-DD para la BD
+        try:
+            dia, mes, anio = fecha_compra_input.split('/')
+            # Validar que sea una fecha válida
+            dia = int(dia)
+            mes = int(mes)
+            anio = int(anio)
+            
+            # Validación básica
+            if dia < 1 or dia > 31 or mes < 1 or mes > 12 or anio < 2000 or anio > 2100:
+                print(f"{self.COLOR_ROJO}❌ Fecha inválida{self.COLOR_RESET}")
+                self.pausa()
+                return
+                
+            fecha_compra = f"{anio:04d}-{mes:02d}-{dia:02d}"
+            print(f"   {self.COLOR_VERDE}✅ Fecha registrada: {fecha_compra_input}{self.COLOR_RESET}")
+        except (ValueError, IndexError):
+            print(f"{self.COLOR_ROJO}❌ Formato de fecha inválido. Use DD/MM/YYYY (ejemplo: 25/02/2026){self.COLOR_RESET}")
+            self.pausa()
+            return
+        
+        # 5. FECHA ESTIMADA DE LLEGADA (opcional)
         print(f"\n{self.COLOR_AMARILLO}5. FECHA ESTIMADA DE LLEGADA (opcional){self.COLOR_RESET}")
-        fecha_llegada = input("   Fecha estimada (YYYY-MM-DD) [Enter para omitir]: ").strip()
-        if not fecha_llegada:
-            fecha_llegada = None
-        else:
-            print(f"   {self.COLOR_VERDE}✅ Fecha registrada: {fecha_llegada}{self.COLOR_RESET}")
+        fecha_llegada_input = input("   Fecha estimada (DD/MM/YYYY) [Enter para omitir]: ").strip()
+        
+        fecha_llegada = None
+        if fecha_llegada_input:
+            try:
+                dia, mes, anio = fecha_llegada_input.split('/')
+                # Validar que sea una fecha válida
+                dia = int(dia)
+                mes = int(mes)
+                anio = int(anio)
+                
+                # Validación básica
+                if dia < 1 or dia > 31 or mes < 1 or mes > 12 or anio < 2000 or anio > 2100:
+                    print(f"{self.COLOR_ROJO}❌ Fecha inválida{self.COLOR_RESET}")
+                    self.pausa()
+                    return
+                    
+                fecha_llegada = f"{anio:04d}-{mes:02d}-{dia:02d}"
+                print(f"   {self.COLOR_VERDE}✅ Fecha registrada: {fecha_llegada_input}{self.COLOR_RESET}")
+            except (ValueError, IndexError):
+                print(f"{self.COLOR_ROJO}❌ Formato de fecha inválido. Use DD/MM/YYYY (ejemplo: 28/02/2026){self.COLOR_RESET}")
+                self.pausa()
+                return
         
         # 6. ADJUNTAR ARCHIVO
         print(f"\n{self.COLOR_AMARILLO}6. ADJUNTAR ARCHIVO{self.COLOR_RESET}")
@@ -4617,7 +4659,7 @@ class SistemaVentas:
         
         # RESUMEN
         print(f"\n{self.COLOR_CYAN}{'='*60}{self.COLOR_RESET}")
-        print(f"{self.COLOR_VERGE}📋 RESUMEN DE COMPRA{self.COLOR_RESET}")
+        print(f"{self.COLOR_VERDE}📋 RESUMEN DE COMPRA{self.COLOR_RESET}")
         print(f"{self.COLOR_CYAN}{'='*60}{self.COLOR_RESET}")
         print(f"Código Factura: {self.COLOR_AMARILLO}{codigo_factura}{self.COLOR_RESET}")
         if proveedor_data:
@@ -4902,9 +4944,7 @@ class SistemaVentas:
                     proveedor_sel = proveedores[idx]
                     idproveedor = proveedor_sel['idproveedor']
                     
-                    # Buscar órdenes de este proveedor (pendiente implementar)
-                    print(f"\n{self.COLOR_AMARILLO}   🔍 Buscando órdenes del proveedor...{self.COLOR_RESET}")
-                    # Por ahora, redirigimos a ver órdenes pendientes
+                    # Buscar órdenes de este proveedor
                     ordenes = orden_service.listar_ordenes_pendientes()
                     ordenes_proveedor = [o for o in ordenes if o.get('idproveedor') == idproveedor]
                     
@@ -4983,7 +5023,7 @@ class SistemaVentas:
                     email = input("   Email (opcional): ").strip() or None
                     direccion = input("   Dirección (opcional): ").strip() or None
                     
-                    print(f"{self.COLOR_VERDE}   ✅ Proveedor creado exitosamente{self.COLOR_RESET}")
+                    print(f"{self.COLOR_VERDE}   ✅ Proveedor creado exitosamente (simulado){self.COLOR_RESET}")
                     idproveedor = 999  # Simulado
                 else:
                     proveedores = []
@@ -5032,10 +5072,20 @@ class SistemaVentas:
         # 2. DATOS DE RECEPCIÓN
         print(f"\n{self.COLOR_AMARILLO}2. DATOS DE RECEPCIÓN{self.COLOR_RESET}")
         from datetime import datetime
-        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-        fecha_recepcion = input(f"   Fecha de recepción [HOY={fecha_hoy}]: ").strip()
-        if not fecha_recepcion:
-            fecha_recepcion = fecha_hoy
+        fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+        fecha_recepcion_input = input(f"   Fecha de recepción [HOY={fecha_hoy}]: ").strip()
+        
+        if not fecha_recepcion_input:
+            fecha_recepcion_input = fecha_hoy
+        
+        # Convertir de DD/MM/YYYY a YYYY-MM-DD para la BD
+        try:
+            dia, mes, anio = fecha_recepcion_input.split('/')
+            fecha_recepcion = f"{anio}-{mes}-{dia}"
+        except:
+            print(f"{self.COLOR_ROJO}❌ Formato de fecha inválido. Use DD/MM/YYYY{self.COLOR_RESET}")
+            self.pausa()
+            return
         
         print(f"\n   Estado de la mercancía:")
         print("   [1] Completa (todo llegó bien)")
@@ -5055,42 +5105,65 @@ class SistemaVentas:
         if not observaciones:
             observaciones = None
         
-        # 3. INGRESAR PRODUCTOS
-        print(f"\n{self.COLOR_AMARILLO}3. INGRESAR PRODUCTOS RECIBIDOS{self.COLOR_RESET}")
-        print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
-        print("   Instrucciones:")
-        print("   - Ingrese código de barras o PLU")
-        print("   - Si el código no existe, puede crear el producto")
-        print("   - Presione Enter sin código para terminar")
-        print("   - Ingrese 0 para cancelar")
-        print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
-        
+        # 3. INGRESAR PRODUCTOS RECIBIDOS
         items_recibidos = []
         productos_nuevos = 0
         
         while True:
-            print(f"\n{self.COLOR_CYAN}{'-'*50}{self.COLOR_RESET}")
-            codigo = input("   Código: ").strip()
+            print(f"\n{self.COLOR_AMARILLO}3. INGRESAR PRODUCTOS RECIBIDOS{self.COLOR_RESET}")
+            print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
+            print("   ¿Qué desea hacer?")
+            print("   [1] Ingresar producto existente (código de barras/PLU)")
+            print("   [2] Crear nuevo producto")
+            print("   [0] Cancelar recepción")
+            print("   [Enter] Terminar ingreso de productos")
+            print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
             
-            if not codigo:
+            accion = input("   Seleccione: ").strip()
+            
+            if accion == '':
+                # Terminar ingreso
                 break
-            if codigo == '0':
+                
+            if accion == '0':
                 if items_recibidos:
-                    print(f"{self.COLOR_AMARILLO}   ¿Cancelar recepción? [S/N]: {self.COLOR_RESET}")
+                    print(f"{self.COLOR_AMARILLO}   ¿Cancelar toda la recepción? [S/N]: {self.COLOR_RESET}")
                     if input().upper() == 'S':
+                        print(f"{self.COLOR_AMARILLO}   Recepción cancelada{self.COLOR_RESET}")
+                        self.pausa()
                         return
                     else:
                         continue
                 else:
+                    print(f"{self.COLOR_AMARILLO}   Recepción cancelada{self.COLOR_RESET}")
+                    self.pausa()
                     return
             
-            # Buscar artículo
-            articulo = self.articulo_service.buscar_por_codigo(codigo)
-            
-            if articulo:
+            elif accion == '1':
+                # Ingresar producto existente
+                codigo = input("   Ingrese código de barras o PLU: ").strip()
+                if not codigo:
+                    continue
+                
+                # Buscar artículo
+                articulo = self.articulo_service.buscar_por_codigo(codigo)
+                
+                if not articulo:
+                    print(f"{self.COLOR_ROJO}   ❌ Producto no encontrado{self.COLOR_RESET}")
+                    continue
+                
                 # Producto existente
-                print(f"{self.COLOR_VERDE}   → Producto encontrado: {articulo['nombre']} (ID: {articulo['idarticulo']}){self.COLOR_RESET}")
-                print(f"   Stock actual: {articulo.get('stock_actual', 0)} unidades")
+                print(f"\n{self.COLOR_VERDE}   → Producto encontrado: {articulo['nombre']} (ID: {articulo['idarticulo']}){self.COLOR_RESET}")
+                
+                # Obtener stock real desde inventario_service
+                from capa_negocio.inventario_service import InventarioService
+                inventario_service = InventarioService(self.articulo_service)
+                stock_real = inventario_service.obtener_stock_articulo(articulo['idarticulo'])
+                print(f"   Stock actual: {stock_real} unidades")
+                
+                # Mostrar precio actual
+                precio_compra_actual = articulo.get('precio_venta', 0) or articulo.get('precio_compra', 0)
+                print(f"   Precio actual del artículo: ${precio_compra_actual:.2f}")
                 
                 try:
                     cantidad = int(input("   Cantidad recibida: "))
@@ -5099,13 +5172,42 @@ class SistemaVentas:
                         continue
                     
                     lote = input("   Lote [opcional]: ").strip() or None
-                    vencimiento = input("   Fecha vencimiento [YYYY-MM-DD] [opcional]: ").strip() or None
                     
-                    print("   ¿Desea ingresar precio de compra unitario? [S/N]: ")
-                    precio_opcion = input().upper()
-                    precio = None
-                    if precio_opcion == 'S':
-                        precio = float(input("   Precio unitario USD: "))
+                    # Fecha vencimiento en formato DD/MM/YYYY
+                    vencimiento_input = input("   Fecha vencimiento [DD/MM/YYYY] [opcional]: ").strip()
+                    vencimiento = None
+                    if vencimiento_input:
+                        try:
+                            dia_v, mes_v, anio_v = vencimiento_input.split('/')
+                            vencimiento = f"{anio_v}-{mes_v}-{dia_v}"
+                        except:
+                            print(f"{self.COLOR_AMARILLO}   ⚠️ Formato inválido, se omite fecha{self.COLOR_RESET}")
+                    
+                    print(f"\n   Precio actual del artículo es: ${precio_compra_actual:.2f}")
+                    print("   ¿Desea modificar el precio? [S/N]: ")
+                    modificar_precio = input().upper()
+                    
+                    precio = precio_compra_actual
+                    if modificar_precio == 'S':
+                        try:
+                            nuevo_precio = float(input("   Nuevo precio unitario USD: "))
+                            if nuevo_precio > 0:
+                                precio = nuevo_precio
+                                print(f"{self.COLOR_VERDE}   ✅ Precio actualizado a ${precio:.2f}{self.COLOR_RESET}")
+                                
+                                # Actualizar precio en la tabla articulo
+                                try:
+                                    if self.articulo_service.actualizar_precio(articulo['idarticulo'], precio):
+                                        print(f"      {self.COLOR_VERDE}💾 Precio guardado en base de datos{self.COLOR_RESET}")
+                                        articulo['precio_venta'] = precio
+                                    else:
+                                        print(f"      {self.COLOR_AMARILLO}⚠️ No se pudo guardar el precio{self.COLOR_RESET}")
+                                except Exception as e:
+                                    print(f"      {self.COLOR_AMARILLO}⚠️ Error guardando precio: {e}{self.COLOR_RESET}")
+                            else:
+                                print(f"{self.COLOR_AMARILLO}   ⚠️ Precio inválido, se mantiene ${precio:.2f}{self.COLOR_RESET}")
+                        except ValueError:
+                            print(f"{self.COLOR_AMARILLO}   ⚠️ Valor inválido, se mantiene ${precio:.2f}{self.COLOR_RESET}")
                     
                     items_recibidos.append({
                         'idarticulo': articulo['idarticulo'],
@@ -5119,80 +5221,111 @@ class SistemaVentas:
                     })
                     
                     print(f"{self.COLOR_VERDE}   ✅ Producto agregado{self.COLOR_RESET}")
-                    if precio:
-                        print(f"      {cantidad} x USD {precio:.2f} = USD {cantidad * precio:.2f}")
+                    print(f"      {cantidad} x ${precio:.2f} = ${cantidad * precio:.2f}")
                     
                 except ValueError:
                     print(f"{self.COLOR_ROJO}❌ Valor inválido{self.COLOR_RESET}")
                     continue
-                    
-            else:
-                # Producto NO encontrado
-                print(f"{self.COLOR_AMARILLO}   ⚠️ Producto NO encontrado en el sistema{self.COLOR_RESET}")
-                print("   ¿Crear nuevo producto? [S/N]: ")
+            
+            elif accion == '2':
+                # Crear nuevo producto
+                print(f"\n{self.COLOR_AMARILLO}   📝 CREAR NUEVO PRODUCTO{self.COLOR_RESET}")
                 
-                if input().upper() == 'S':
-                    print(f"\n{self.COLOR_AMARILLO}   📝 DATOS DEL NUEVO PRODUCTO:{self.COLOR_RESET}")
-                    nombre = input("   Nombre: ")
-                    
-                    print("   Categoría:")
-                    print("   [1] Lácteos")
-                    print("   [2] Bebidas")
-                    print("   [3] Abarrotes")
-                    print("   [4] Otro")
-                    cat_opcion = input("   Seleccione: ")
-                    categoria = {
-                        '1': 'Lácteos',
-                        '2': 'Bebidas',
-                        '3': 'Abarrotes'
-                    }.get(cat_opcion, 'Otro')
-                    
-                    unidad = input("   Unidad de medida: ")
-                    
-                    print("   ¿Es perecedero? [S/N]: ")
-                    perecedero = input().upper() == 'S'
-                    
-                    try:
-                        cantidad = int(input("   Cantidad recibida: "))
-                        if cantidad <= 0:
-                            print(f"{self.COLOR_ROJO}❌ Cantidad inválida{self.COLOR_RESET}")
-                            continue
-                        
-                        lote = input("   Lote [opcional]: ").strip() or None
-                        vencimiento = None
-                        if perecedero:
-                            vencimiento = input("   Fecha vencimiento [YYYY-MM-DD]: ").strip() or None
-                        
-                        print("   ¿Desea ingresar precio de compra unitario? [S/N]: ")
-                        precio_opcion = input().upper()
-                        precio = None
-                        if precio_opcion == 'S':
-                            precio = float(input("   Precio unitario USD: "))
-                        
-                        items_recibidos.append({
-                            'idarticulo': None,
-                            'codigo': codigo,
-                            'nombre': nombre,
-                            'categoria': categoria,
-                            'unidad': unidad,
-                            'perecedero': perecedero,
-                            'cantidad': cantidad,
-                            'lote': lote,
-                            'vencimiento': vencimiento,
-                            'precio': precio,
-                            'es_nuevo': True
-                        })
-                        
-                        productos_nuevos += 1
-                        print(f"{self.COLOR_VERDE}   ✅ Producto creado y agregado{self.COLOR_RESET}")
-                        if precio:
-                            print(f"      {cantidad} x USD {precio:.2f} = USD {cantidad * precio:.2f}")
-                        
-                    except ValueError:
-                        print(f"{self.COLOR_ROJO}❌ Valor inválido{self.COLOR_RESET}")
-                        continue
-                else:
+                # Pedir código primero
+                codigo = input("   Ingrese código para el nuevo producto: ").strip()
+                if not codigo:
+                    print(f"{self.COLOR_ROJO}   ❌ Código obligatorio{self.COLOR_RESET}")
                     continue
+                
+                # Verificar que no exista
+                articulo_existente = self.articulo_service.buscar_por_codigo(codigo)
+                if articulo_existente:
+                    print(f"{self.COLOR_ROJO}   ❌ Ya existe un producto con ese código{self.COLOR_RESET}")
+                    continue
+                
+                nombre = input("   Nombre: ")
+                if not nombre:
+                    print(f"{self.COLOR_ROJO}   ❌ Nombre obligatorio{self.COLOR_RESET}")
+                    continue
+                
+                print("   Categoría:")
+                print("   [1] Lácteos")
+                print("   [2] Bebidas")
+                print("   [3] Abarrotes")
+                print("   [4] Electrónica")
+                print("   [5] Otro")
+                cat_opcion = input("   Seleccione: ")
+                
+                # Mapear categoría a ID
+                idcategoria = 1  # Por defecto
+                categoria_nombre = 'Otro'
+                if cat_opcion == '1':
+                    idcategoria = 2
+                    categoria_nombre = 'Lácteos'
+                elif cat_opcion == '2':
+                    idcategoria = 3
+                    categoria_nombre = 'Bebidas'
+                elif cat_opcion == '3':
+                    idcategoria = 4
+                    categoria_nombre = 'Abarrotes'
+                elif cat_opcion == '4':
+                    idcategoria = 5
+                    categoria_nombre = 'Electrónica'
+                
+                unidad = input("   Unidad de medida: ")
+                if not unidad:
+                    unidad = "Unidad"
+                
+                print("   ¿Es perecedero? [S/N]: ")
+                perecedero = input().upper() == 'S'
+                
+                try:
+                    cantidad = int(input("   Cantidad recibida: "))
+                    if cantidad <= 0:
+                        print(f"{self.COLOR_ROJO}❌ Cantidad inválida{self.COLOR_RESET}")
+                        continue
+                    
+                    lote = input("   Lote [opcional]: ").strip() or None
+                    
+                    vencimiento = None
+                    if perecedero:
+                        vencimiento_input = input("   Fecha vencimiento [DD/MM/YYYY]: ").strip()
+                        if vencimiento_input:
+                            try:
+                                dia_v, mes_v, anio_v = vencimiento_input.split('/')
+                                vencimiento = f"{anio_v}-{mes_v}-{dia_v}"
+                            except:
+                                print(f"{self.COLOR_AMARILLO}   ⚠️ Formato inválido, se omite fecha{self.COLOR_RESET}")
+                    
+                    print("   Ingrese precio de compra unitario USD:")
+                    precio = float(input("   Precio: "))
+                    
+                    items_recibidos.append({
+                        'idarticulo': None,
+                        'codigo': codigo,
+                        'nombre': nombre,
+                        'categoria': categoria_nombre,
+                        'idcategoria': idcategoria,
+                        'unidad': unidad,
+                        'perecedero': perecedero,
+                        'cantidad': cantidad,
+                        'lote': lote,
+                        'vencimiento': vencimiento,
+                        'precio': precio,
+                        'es_nuevo': True
+                    })
+                    
+                    productos_nuevos += 1
+                    print(f"{self.COLOR_VERDE}   ✅ Producto listo para crear al confirmar{self.COLOR_RESET}")
+                    print(f"      {cantidad} x ${precio:.2f} = ${cantidad * precio:.2f}")
+                    
+                except ValueError:
+                    print(f"{self.COLOR_ROJO}❌ Valor inválido{self.COLOR_RESET}")
+                    continue
+            
+            else:
+                print(f"{self.COLOR_ROJO}   ❌ Opción inválida{self.COLOR_RESET}")
+                continue
         
         if not items_recibidos:
             print(f"{self.COLOR_ROJO}❌ No se ingresaron productos{self.COLOR_RESET}")
@@ -5207,12 +5340,10 @@ class SistemaVentas:
         
         subtotal_usd = 0
         for item in items_recibidos:
-            if item['precio']:
-                subtotal_item = item['cantidad'] * item['precio']
-                subtotal_usd += subtotal_item
-                print(f"   {item['nombre']}: {item['cantidad']} unidades - USD {subtotal_item:.2f}")
-            else:
-                print(f"   {item['nombre']}: {item['cantidad']} unidades - (precio no ingresado)")
+            subtotal_item = item['cantidad'] * item['precio']
+            subtotal_usd += subtotal_item
+            estado = "NUEVO" if item['es_nuevo'] else "EXISTENTE"
+            print(f"   {item['nombre']}: {item['cantidad']} unidades - USD {subtotal_item:.2f} {estado}")
         
         print(f"\n   Subtotal USD: {self.COLOR_AMARILLO}{subtotal_usd:,.2f}{self.COLOR_RESET}")
         print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
@@ -5249,7 +5380,7 @@ class SistemaVentas:
                 try:
                     cantidad_dev = int(input("   Cantidad a devolver: "))
                     if cantidad_dev <= 0 or cantidad_dev > producto_encontrado['cantidad']:
-                        print(f"{self.COLOR_ROJO}❌ Cantidad inválida{self.COLOR_RESET}")
+                        print(f"{self.COLOR_ROJO}❌ Cantidad inválida (máx {producto_encontrado['cantidad']}){self.COLOR_RESET}")
                         continue
                     
                     print("   Motivo de devolución:")
@@ -5278,6 +5409,11 @@ class SistemaVentas:
                     
                     print(f"{self.COLOR_VERDE}   ✅ Devolución registrada{self.COLOR_RESET}")
                     
+                    # Preguntar si desea registrar otra devolución
+                    print(f"\n{self.COLOR_AMARILLO}   ¿Registrar otra devolución? [S/N]: {self.COLOR_RESET}")
+                    if input().upper() != 'S':
+                        break
+                    
                 except ValueError:
                     print(f"{self.COLOR_ROJO}❌ Valor inválido{self.COLOR_RESET}")
                     continue
@@ -5292,14 +5428,13 @@ class SistemaVentas:
             print(f"   Orden: {orden_data['codigo_factura']} ({orden_data['proveedor']})")
         else:
             print(f"   Recepción directa - Proveedor ID: {idproveedor}")
-        print(f"   Fecha recepción: {fecha_recepcion}")
+        print(f"   Fecha recepción: {fecha_recepcion_input}")
         print(f"   Estado: {estado_mercancia}")
         print(f"\n   {self.COLOR_VERDE}Productos recibidos:{self.COLOR_RESET}")
         
         total_neto = 0
         for item in items_recibidos:
-            estado = "NUEVO" if item['es_nuevo'] else "EXISTENTE"
-            print(f"   ✓ {item['nombre']}: {item['cantidad']} uds {estado}")
+            print(f"   ✓ {item['nombre']}: {item['cantidad']} uds ${item['precio']:.2f} c/u")
             total_neto += item['cantidad']
         
         if devoluciones:
@@ -5318,21 +5453,86 @@ class SistemaVentas:
         if confirmar == 'S':
             print(f"\n{self.COLOR_VERDE}   🔄 PROCESANDO...{self.COLOR_RESET}")
             print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
-            print(f"{self.COLOR_VERDE}   ✅ Stock actualizado en Kardex{self.COLOR_RESET}")
-            print(f"{self.COLOR_VERDE}   ✅ Lotes registrados en el sistema{self.COLOR_RESET}")
-            if productos_nuevos > 0:
-                print(f"{self.COLOR_VERDE}   ✅ Nuevos productos creados: {productos_nuevos}{self.COLOR_RESET}")
+            
+            # Generar ID de recepción
+            from datetime import datetime
+            idrecepcion = datetime.now().strftime('%Y%m%d%H%M%S')
+            
+            # Registrar cada producto en kardex
+            from capa_negocio.inventario_service import InventarioService
+            inventario_service = InventarioService(self.articulo_service)
+            
+            productos_registrados = 0
+            productos_creados = 0
+            
+            for item in items_recibidos:
+                try:
+                    if item['es_nuevo']:
+                        # Crear nuevo producto en BD
+                        if hasattr(self.articulo_service, 'crear_articulo'):
+                            nuevo_id = self.articulo_service.crear_articulo(
+                                codigo_barras=item['codigo'],
+                                nombre=item['nombre'],
+                                idcategoria=item.get('idcategoria', 1),
+                                precio_venta=item['precio'],
+                                stock_minimo=5,
+                                precio_compra=item['precio'],
+                                igtf=False
+                            )
+                            
+                            if nuevo_id:
+                                item['idarticulo'] = nuevo_id
+                                productos_creados += 1
+                                print(f"{self.COLOR_VERDE}   ✅ Producto {item['nombre']} creado con ID {nuevo_id}{self.COLOR_RESET}")
+                            else:
+                                print(f"{self.COLOR_ROJO}   ❌ Error creando producto {item['nombre']}{self.COLOR_RESET}")
+                                continue
+                        else:
+                            print(f"{self.COLOR_ROJO}   ❌ Método crear_articulo no disponible{self.COLOR_RESET}")
+                            continue
+                    
+                    # Registrar movimiento en kardex
+                    if item.get('idarticulo'):
+                        resultado = inventario_service.registrar_movimiento(
+                            idarticulo=item['idarticulo'],
+                            tipo_movimiento='ENTRADA',
+                            cantidad=item['cantidad'],
+                            referencia=f"RECEPCIÓN #{idrecepcion} - Orden: {orden_data['codigo_factura'] if orden_data else 'Directa'}",
+                            precio_compra=item['precio'],
+                            lote=item.get('lote'),
+                            fecha_vencimiento=item.get('vencimiento')
+                        )
+                        
+                        if resultado:
+                            productos_registrados += 1
+                            print(f"{self.COLOR_VERDE}   ✅ {item['nombre']}: +{item['cantidad']} unidades (Kardex){self.COLOR_RESET}")
+                        else:
+                            print(f"{self.COLOR_ROJO}   ❌ Error registrando {item['nombre']} en kardex{self.COLOR_RESET}")
+                    else:
+                        print(f"{self.COLOR_ROJO}   ❌ Producto {item['nombre']} sin ID válido{self.COLOR_RESET}")
+                        
+                except Exception as e:
+                    logger.error(f"Error procesando producto {item['nombre']}: {e}")
+                    print(f"{self.COLOR_ROJO}   ❌ Error: {e}{self.COLOR_RESET}")
+            
+            print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
+            print(f"{self.COLOR_VERDE}   ✅ Stock actualizado en Kardex ({productos_registrados} productos){self.COLOR_RESET}")
+            if productos_creados > 0:
+                print(f"{self.COLOR_VERDE}   ✅ Nuevos productos creados: {productos_creados}{self.COLOR_RESET}")
+            if lote:
+                print(f"{self.COLOR_VERDE}   ✅ Lotes registrados en el sistema{self.COLOR_RESET}")
             if devoluciones:
                 print(f"{self.COLOR_VERDE}   ✅ Devoluciones procesadas: {len(devoluciones)}{self.COLOR_RESET}")
             if orden_data:
+                # Aquí iría la lógica para marcar la orden como recibida
                 print(f"{self.COLOR_VERDE}   ✅ Orden de compra marcada como RECIBIDA{self.COLOR_RESET}")
             print(f"   {self.COLOR_CYAN}{'-'*60}{self.COLOR_RESET}")
             
             print(f"\n{self.COLOR_VERDE}{'🎉'*10}{self.COLOR_RESET}")
             print(f"{self.COLOR_VERDE}   RECEPCIÓN COMPLETADA EXITOSAMENTE{self.COLOR_RESET}")
             print(f"{self.COLOR_VERDE}{'🎉'*10}{self.COLOR_RESET}")
-            print(f"   ID de recepción: {self.COLOR_AMARILLO}{datetime.now().strftime('%Y%m%d%H%M%S')}{self.COLOR_RESET}")
-            print(f"   Fecha: {fecha_recepcion}")
+            print(f"   ID de recepción: {self.COLOR_AMARILLO}{idrecepcion}{self.COLOR_RESET}")
+            print(f"   Fecha: {fecha_recepcion_input}")
         else:
             print(f"{self.COLOR_AMARILLO}   Recepción cancelada{self.COLOR_RESET}")
         

@@ -403,3 +403,52 @@ class ArticuloRepositorio:
         except Exception as e:
             logger.error(f"Error buscando por PLU {plu}: {e}")
             return None    
+
+    def actualizar_precio(self, idarticulo, nuevo_precio):
+        """
+        Actualiza el precio de venta de un artículo en la base de datos
+        
+        Args:
+            idarticulo (int): ID del artículo a actualizar
+            nuevo_precio (float): Nuevo precio en USD
+            
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            # Verificar que la conexión esté activa
+            if not self.conn:
+                logger.error("❌ No hay conexión a la base de datos")
+                return False
+            
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Actualizar precio
+            query = "UPDATE articulo SET precio_venta = ? WHERE idarticulo = ?"
+            cursor.execute(query, (nuevo_precio, idarticulo))
+            
+            # Confirmar cambios
+            self.conn.commit()
+            
+            # Verificar que se actualizó
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Precio actualizado en BD para artículo {idarticulo}: ${nuevo_precio:.2f}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando precio en BD: {e}")
+            # Revertir cambios en caso de error
+            try:
+                self.conn.rollback()
+            except:
+                pass
+            return False

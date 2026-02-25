@@ -13,14 +13,10 @@ class InventarioService(BaseService):
     COLOR_RESET = '\033[0m'
     
     def __init__(self, articulo_service):
-        """
-        Inicializa el servicio de inventario
-        
-        Args:
-            articulo_service: Servicio de artículos para obtener información de productos
-        """
-        super().__init__()
+        """Inicializa el servicio de inventario"""
         self.articulo_service = articulo_service
+        from capa_datos.inventario_repo import InventarioRepositorio
+        self.repo = InventarioRepositorio()
         logger.info("✅ InventarioService inicializado")
     
     def obtener_stock_articulo(self, idarticulo):
@@ -57,6 +53,63 @@ class InventarioService(BaseService):
         except Exception as e:
             logger.error(f"Error al obtener stock del artículo {idarticulo}: {e}")
             return 0
+
+    def registrar_movimiento(self, idarticulo, tipo_movimiento, cantidad, 
+                            referencia, precio_compra=None, lote=None, 
+                            fecha_vencimiento=None):
+        """
+        Registra un movimiento en el kardex
+        
+        Args:
+            idarticulo: ID del artículo
+            tipo_movimiento: 'ENTRADA' o 'SALIDA'
+            cantidad: Cantidad del movimiento
+            referencia: Referencia del movimiento (ej: "RECEPCIÓN #123")
+            precio_compra: Precio de compra (opcional)
+            lote: Número de lote (opcional)
+            fecha_vencimiento: Fecha de vencimiento (opcional)
+            
+        Returns:
+            bool: True si se registró correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if cantidad <= 0:
+                logger.warning(f"⚠️ Cantidad inválida: {cantidad}")
+                return False
+            
+            # Validar tipo de movimiento
+            if tipo_movimiento not in ['ENTRADA', 'SALIDA']:
+                logger.warning(f"⚠️ Tipo de movimiento inválido: {tipo_movimiento}")
+                return False
+            
+            # Crear repositorio si no existe
+            from capa_datos.inventario_repo import InventarioRepositorio
+            repo = InventarioRepositorio()
+            
+            # Registrar en el repositorio
+            resultado = repo.registrar_movimiento(
+                idarticulo=idarticulo,
+                tipo_movimiento=tipo_movimiento,
+                cantidad=cantidad,
+                referencia=referencia,
+                precio_compra=precio_compra,
+                lote=lote,
+                fecha_vencimiento=fecha_vencimiento
+            )
+            
+            if resultado:
+                logger.info(f"✅ Movimiento registrado: {tipo_movimiento} {cantidad} unidades - Artículo {idarticulo}")
+                return True
+            else:
+                logger.error(f"❌ Error registrando movimiento en repositorio")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en registrar_movimiento: {e}")
+            return False
     
     def _insertar_stock_inicial(self, idarticulo):
         """
@@ -236,33 +289,35 @@ class InventarioService(BaseService):
     
     def listar_con_stock(self):
         """
-        Lista todos los artículos con su stock actual y nivel
+        Lista todos los artículos con su stock actual desde kardex
         """
         try:
-            articulos = self.articulo_service.listar()
-            resultado = []
+            # Usar el método correcto del servicio de artículos
+            if not self.articulo_service:
+                logger.error("❌ ArticuloService no disponible")
+                return []
             
+            # Obtener artículos usando el método correcto
+            articulos = self.articulo_service.listar_articulos()  # Cambiado de listar() a listar_articulos()
+            
+            if not articulos:
+                logger.info("📭 No hay artículos registrados")
+                return []
+            
+            # Enriquecer con stock actual
             for art in articulos:
-                stock = self.obtener_stock_articulo(art['idarticulo'])
-                nivel = self.obtener_nivel_stock(stock)
-                
-                resultado.append({
-                    'idarticulo': art['idarticulo'],
-                    'codigo': art['codigo'],
-                    'nombre': art['nombre'],
-                    'categoria': art.get('categoria', 'Sin categoría'),
-                    'precio_venta': art.get('precio_venta', 0),
-                    'stock_actual': stock,
-                    'nivel_stock': nivel['nivel'],
-                    'color': nivel['color'],
-                    'emoji': nivel['emoji'],
-                    'mensaje': nivel['mensaje']
-                })
+                try:
+                    stock = self.obtener_stock_articulo(art['idarticulo'])
+                    art['stock_actual'] = stock
+                except Exception as e:
+                    logger.error(f"Error obteniendo stock para artículo {art['idarticulo']}: {e}")
+                    art['stock_actual'] = 0
             
-            return resultado
+            logger.info(f"✅ {len(articulos)} artículos listados con stock")
+            return articulos
             
         except Exception as e:
-            logger.error(f"Error al listar artículos con stock: {e}")
+            logger.error(f"❌ Error al listar artículos con stock: {e}")
             return []
     
     def mostrar_tabla_stock(self):

@@ -1,318 +1,338 @@
 """
-Servicio para la gestión de artículos
+Servicio para gestión de artículos
 """
 from loguru import logger
+from typing import List, Dict, Optional
 from capa_negocio.base_service import BaseService
+from capa_datos.articulo_repo import ArticuloRepositorio
+from capa_datos.categoria_repo import CategoriaRepositorio
 
 class ArticuloService(BaseService):
-    """Servicio que implementa la lógica de negocio para artículos"""
-    
-    def __init__(self, repositorio, categoria_service):
+    def __init__(self, repositorio: ArticuloRepositorio, categoria_service=None):
         """
         Inicializa el servicio de artículos
         
         Args:
-            repositorio: Instancia de ArticuloRepositorio
-            categoria_service: Servicio de categorías
+            repositorio: Repositorio de artículos
+            categoria_service: Servicio de categorías (opcional)
         """
         super().__init__()
         self.repositorio = repositorio
         self.categoria_service = categoria_service
-        logger.info("✅ ArticuloService inicializado")
-    
-    def listar(self):
+        
+    def listar_articulos(self) -> List[Dict]:
         """
         Lista todos los artículos
         
         Returns:
-            list: Lista de artículos o lista vacía si hay error
+            List[Dict]: Lista de artículos
         """
         try:
-            return self.repositorio.listar()
+            articulos = self.repositorio.listar()
+            logger.info(f"✅ {len(articulos)} artículos listados")
+            return articulos
         except Exception as e:
-            logger.error(f"Error al listar artículos: {e}")
+            logger.error(f"❌ Error listando artículos: {e}")
             return []
     
-    def obtener_por_id(self, idarticulo):
+    def buscar_por_id(self, idarticulo: int) -> Optional[Dict]:
         """
-        Obtiene un artículo por su ID
+        Busca un artículo por su ID
         
         Args:
-            idarticulo (int): ID del artículo
+            idarticulo: ID del artículo
             
         Returns:
-            dict: Datos del artículo o None si no existe
+            Optional[Dict]: Artículo encontrado o None
         """
         try:
             if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
                 return None
-            return self.repositorio.obtener_por_id(idarticulo)
+                
+            articulo = self.repositorio.obtener_por_id(idarticulo)
+            if articulo:
+                logger.info(f"✅ Artículo ID {idarticulo} encontrado: {articulo['nombre']}")
+            else:
+                logger.warning(f"⚠️ Artículo ID {idarticulo} no encontrado")
+            return articulo
         except Exception as e:
-            logger.error(f"Error al obtener artículo {idarticulo}: {e}")
+            logger.error(f"❌ Error buscando artículo {idarticulo}: {e}")
             return None
     
-    def buscar_por_codigo(self, codigo):
+    def buscar_por_codigo(self, codigo: str) -> Optional[Dict]:
         """
-        Busca un artículo por su código
+        Busca un artículo por su código de barras o PLU
         
         Args:
-            codigo (str): Código del artículo
+            codigo: Código de barras o PLU
             
         Returns:
-            dict: Datos del artículo o None si no existe
+            Optional[Dict]: Artículo encontrado o None
         """
         try:
-            return self.repositorio.buscar_por_codigo(codigo)
+            if not codigo:
+                logger.warning("⚠️ Código vacío")
+                return None
+                
+            articulo = self.repositorio.buscar_por_codigo(codigo)
+            if articulo:
+                logger.info(f"✅ Artículo encontrado: {articulo['nombre']} (código: {codigo})")
+            else:
+                logger.debug(f"Artículo con código {codigo} no encontrado")
+            return articulo
         except Exception as e:
-            logger.error(f"Error al buscar artículo por código {codigo}: {e}")
+            logger.error(f"❌ Error buscando por código {codigo}: {e}")
             return None
     
-    def crear(self, codigo, nombre, idcategoria, idpresentacion, descripcion=None, 
-              precio_venta=0, precio_referencia=None):
+    def crear_articulo(self, codigo_barras: str, nombre: str, idcategoria: int,
+                       precio_venta: float, stock_minimo: int = 5,
+                       precio_compra: float = 0, igtf: bool = False) -> Optional[int]:
         """
-        Crea un nuevo artículo con precio de venta
+        Crea un nuevo artículo
         
         Args:
-            codigo (str): Código del artículo
-            nombre (str): Nombre del artículo
-            idcategoria (int): ID de la categoría
-            idpresentacion (int): ID de la presentación
-            descripcion (str, optional): Descripción
-            precio_venta (float): Precio de venta en USD
-            precio_referencia (float, optional): Precio de referencia (costo)
+            codigo_barras: Código de barras o PLU
+            nombre: Nombre del artículo
+            idcategoria: ID de la categoría
+            precio_venta: Precio de venta en USD
+            stock_minimo: Stock mínimo para alertas
+            precio_compra: Precio de compra (opcional)
+            igtf: Aplica IGTF (True/False)
             
         Returns:
-            bool: True si se creó correctamente, False en caso contrario
+            Optional[int]: ID del artículo creado o None
         """
         try:
             # Validaciones
-            if not codigo or not codigo.strip():
-                logger.error("El código del artículo es obligatorio")
-                return False
-            
-            if not nombre or not nombre.strip():
-                logger.error("El nombre del artículo es obligatorio")
-                return False
-            
+            if not codigo_barras:
+                logger.warning("⚠️ Código de barras obligatorio")
+                return None
+                
+            if not nombre:
+                logger.warning("⚠️ Nombre obligatorio")
+                return None
+                
             if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
-                return False
+                return None
+                
+            if precio_venta <= 0:
+                logger.warning(f"⚠️ Precio de venta inválido: {precio_venta}")
+                return None
             
-            if not self.validar_entero_positivo(idpresentacion, "ID de presentación"):
-                return False
-            
-            # Verificar si ya existe un artículo con el mismo código
-            existente = self.repositorio.buscar_por_codigo(codigo)
+            # Verificar si ya existe el código
+            existente = self.repositorio.buscar_por_codigo(codigo_barras)
             if existente:
-                logger.error(f"Ya existe un artículo con el código {codigo}")
-                return False
-            
-            # Validar precio de venta (puede ser 0)
-            if not isinstance(precio_venta, (int, float)) or precio_venta < 0:
-                logger.error("El precio de venta debe ser un número positivo")
-                return False
-            
-            # Validar precio de referencia (puede ser None)
-            if precio_referencia is not None:
-                if not isinstance(precio_referencia, (int, float)) or precio_referencia < 0:
-                    logger.error("El precio de referencia debe ser un número positivo o None")
-                    return False
+                logger.warning(f"⚠️ Ya existe un artículo con código {codigo_barras}")
+                return None
             
             # Crear artículo
-            resultado = self.repositorio.crear(
-                codigo=codigo.strip(),
-                nombre=nombre.strip(),
+            idarticulo = self.repositorio.crear(
+                codigo_barras=codigo_barras,
+                nombre=nombre,
                 idcategoria=idcategoria,
-                idpresentacion=idpresentacion,
-                descripcion=descripcion.strip() if descripcion else None,
                 precio_venta=precio_venta,
-                precio_referencia=precio_referencia
+                stock_minimo=stock_minimo,
+                precio_compra=precio_compra,
+                igtf=igtf
+            )
+            
+            if idarticulo:
+                logger.info(f"✅ Artículo creado: {nombre} (ID: {idarticulo})")
+                
+                # Registrar en auditoría
+                self.registrar_auditoria(
+                    accion='CREAR',
+                    tabla='articulo',
+                    registro_id=idarticulo,
+                    datos_nuevos=f"Código: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
+                )
+                
+            return idarticulo
+            
+        except Exception as e:
+            logger.error(f"❌ Error creando artículo: {e}")
+            return None
+    
+    def actualizar_articulo(self, idarticulo: int, codigo_barras: str, nombre: str,
+                            idcategoria: int, precio_venta: float, stock_minimo: int = 5,
+                            precio_compra: float = 0, igtf: bool = False) -> bool:
+        """
+        Actualiza un artículo existente
+        
+        Args:
+            idarticulo: ID del artículo a actualizar
+            codigo_barras: Nuevo código de barras
+            nombre: Nuevo nombre
+            idcategoria: Nueva categoría
+            precio_venta: Nuevo precio de venta
+            stock_minimo: Nuevo stock mínimo
+            precio_compra: Nuevo precio de compra
+            igtf: Nuevo estado de IGTF
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            # Validaciones
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+                
+            if not codigo_barras:
+                logger.warning("⚠️ Código de barras obligatorio")
+                return False
+                
+            if not nombre:
+                logger.warning("⚠️ Nombre obligatorio")
+                return False
+                
+            if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
+                return False
+                
+            if precio_venta <= 0:
+                logger.warning(f"⚠️ Precio de venta inválido: {precio_venta}")
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Actualizar artículo
+            resultado = self.repositorio.actualizar(
+                idarticulo=idarticulo,
+                codigo_barras=codigo_barras,
+                nombre=nombre,
+                idcategoria=idcategoria,
+                precio_venta=precio_venta,
+                stock_minimo=stock_minimo,
+                precio_compra=precio_compra,
+                igtf=igtf
             )
             
             if resultado:
-                logger.info(f"✅ Artículo creado: {nombre} - Precio: ${precio_venta}")
-                return True
-            else:
-                logger.error("No se pudo crear el artículo")
-                return False
+                logger.info(f"✅ Artículo {idarticulo} actualizado")
                 
+                # Registrar en auditoría
+                self.registrar_auditoria(
+                    accion='ACTUALIZAR',
+                    tabla='articulo',
+                    registro_id=idarticulo,
+                    datos_anteriores=str(datos_anteriores) if datos_anteriores else None,
+                    datos_nuevos=f"Código: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
+                )
+                
+            return resultado
+            
         except Exception as e:
-            logger.error(f"❌ Error al crear artículo: {e}")
+            logger.error(f"❌ Error actualizando artículo {idarticulo}: {e}")
             return False
     
-    def actualizar(self, idarticulo, codigo, nombre, idcategoria, idpresentacion, 
-                   descripcion=None, precio_venta=None, precio_referencia=None):
+    def eliminar_articulo(self, idarticulo: int) -> bool:
         """
-        Actualiza un artículo existente incluyendo precios
+        Elimina un artículo (marca como inactivo)
         
         Args:
-            idarticulo (int): ID del artículo
-            codigo (str): Código del artículo
-            nombre (str): Nombre del artículo
-            idcategoria (int): ID de la categoría
-            idpresentacion (int): ID de la presentación
-            descripcion (str, optional): Descripción
-            precio_venta (float, optional): Precio de venta en USD
-            precio_referencia (float, optional): Precio de referencia (costo)
+            idarticulo: ID del artículo a eliminar
+            
+        Returns:
+            bool: True si se eliminó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            # Obtener datos para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            resultado = self.repositorio.eliminar(idarticulo)
+            
+            if resultado:
+                logger.info(f"✅ Artículo {idarticulo} eliminado")
+                
+                # Registrar en auditoría
+                self.registrar_auditoria(
+                    accion='ELIMINAR',
+                    tabla='articulo',
+                    registro_id=idarticulo,
+                    datos_anteriores=str(datos_anteriores) if datos_anteriores else None
+                )
+                
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"❌ Error eliminando artículo {idarticulo}: {e}")
+            return False
+    
+    def actualizar_precio(self, idarticulo: int, nuevo_precio: float) -> bool:
+        """
+        Actualiza el precio de venta de un artículo
+        
+        Args:
+            idarticulo (int): ID del artículo a actualizar
+            nuevo_precio (float): Nuevo precio en USD
             
         Returns:
             bool: True si se actualizó correctamente, False en caso contrario
         """
         try:
-            # Validar que el artículo existe
-            articulo = self.obtener_por_id(idarticulo)
-            if not articulo:
-                logger.error(f"Artículo {idarticulo} no encontrado")
+            # Validar ID
+            if not idarticulo or idarticulo <= 0:
+                logger.warning(f"⚠️ ID de artículo inválido: {idarticulo}")
                 return False
             
-            # Validaciones básicas
-            if not codigo or not codigo.strip():
-                logger.error("El código del artículo es obligatorio")
+            # Validar precio
+            if nuevo_precio <= 0:
+                logger.warning(f"⚠️ Precio inválido: {nuevo_precio}")
                 return False
             
-            if not nombre or not nombre.strip():
-                logger.error("El nombre del artículo es obligatorio")
-                return False
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
             
-            if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
-                return False
-            
-            if not self.validar_entero_positivo(idpresentacion, "ID de presentación"):
-                return False
-            
-            # Validar precio_venta (FORZAR A FLOAT)
-            if precio_venta is not None:
-                try:
-                    precio_venta = float(precio_venta)
-                except (ValueError, TypeError):
-                    logger.error("El precio de venta debe ser un número válido")
-                    return False
-                    
-                if precio_venta < 0:
-                    logger.error("El precio de venta no puede ser negativo")
-                    return False
-            else:
-                # Si no viene, mantener el actual
-                precio_venta = float(articulo.get('precio_venta', 0))
-            
-            # Validar precio_referencia (puede ser None)
-            if precio_referencia is not None:
-                try:
-                    precio_referencia = float(precio_referencia)
-                except (ValueError, TypeError):
-                    logger.error("El precio de referencia debe ser un número válido")
-                    return False
-                    
-                if precio_referencia < 0:
-                    logger.error("El precio de referencia no puede ser negativo")
-                    return False
-            # Si es None, es válido (no se actualizará en BD)
-            
-            # Verificar si el código ya existe en otro artículo
-            existente = self.repositorio.buscar_por_codigo(codigo)
-            if existente and existente['idarticulo'] != idarticulo:
-                logger.error(f"Ya existe otro artículo con el código {codigo}")
-                return False
-            
-            # Actualizar artículo
-            resultado = self.repositorio.actualizar(
-                idarticulo=idarticulo,
-                codigo=codigo.strip(),
-                nombre=nombre.strip(),
-                idcategoria=idcategoria,
-                idpresentacion=idpresentacion,
-                descripcion=descripcion.strip() if descripcion else None,
-                precio_venta=precio_venta,
-                precio_referencia=precio_referencia
-            )
+            # Llamar al repositorio para actualizar
+            resultado = self.repositorio.actualizar_precio(idarticulo, nuevo_precio)
             
             if resultado:
-                logger.info(f"✅ Artículo {idarticulo} actualizado - Precio: ${precio_venta}")
+                logger.info(f"✅ Precio actualizado para artículo {idarticulo}: ${nuevo_precio:.2f}")
+                
+                # Registrar en auditoría si existe el método
+                if hasattr(self, 'registrar_auditoria'):
+                    self.registrar_auditoria(
+                        accion='ACTUALIZAR_PRECIO',
+                        tabla='articulo',
+                        registro_id=idarticulo,
+                        datos_anteriores=f"Precio anterior: ${datos_anteriores.get('precio_venta', 0):.2f}" if datos_anteriores else None,
+                        datos_nuevos=f"Precio nuevo: ${nuevo_precio:.2f}"
+                    )
+                
                 return True
             else:
-                logger.error(f"No se pudo actualizar el artículo {idarticulo}")
+                logger.error(f"❌ Error actualizando precio del artículo {idarticulo} en repositorio")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Error al actualizar artículo {idarticulo}: {e}")
+            logger.error(f"❌ Error en actualizar_precio: {e}")
             return False
     
-    def eliminar(self, idarticulo):
+    def obtener_categorias(self) -> List[Dict]:
         """
-        Elimina un artículo (verifica si tiene movimientos asociados)
+        Obtiene la lista de categorías
         
-        Args:
-            idarticulo (int): ID del artículo a eliminar
-            
         Returns:
-            bool: True si se eliminó correctamente, False en caso contrario
+            List[Dict]: Lista de categorías
         """
         try:
-            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
-                return False
-            
-            # Verificar que el artículo existe
-            articulo = self.obtener_por_id(idarticulo)
-            if not articulo:
-                logger.error(f"Artículo {idarticulo} no encontrado")
-                return False
-            
-            resultado = self.repositorio.eliminar(idarticulo)
-            
-            if resultado:
-                logger.info(f"✅ Artículo {idarticulo} eliminado correctamente")
-                return True
+            if self.categoria_service:
+                return self.categoria_service.listar_categorias()
             else:
-                logger.error(f"No se pudo eliminar el artículo {idarticulo}")
-                return False
-                
+                logger.warning("⚠️ Servicio de categorías no disponible")
+                return []
         except Exception as e:
-            logger.error(f"Error al eliminar artículo {idarticulo}: {e}")
-            return False
-    
-    def buscar_por_codigo_barras(self, codigo):
-        """
-        Busca artículo por código de barras
-        
-        Args:
-            codigo (str): Código de barras
-            
-        Returns:
-            dict: Datos del artículo o None si no existe
-        """
-        try:
-            return self.repositorio.buscar_por_codigo_barras(codigo)
-        except Exception as e:
-            logger.error(f"Error buscando por código de barras {codigo}: {e}")
-            return None
-    
-    def buscar_por_plu(self, plu):
-        """
-        Busca artículo por código interno PLU
-        
-        Args:
-            plu (str): Código PLU
-            
-        Returns:
-            dict: Datos del artículo o None si no existe
-        """
-        try:
-            return self.repositorio.buscar_por_plu(plu)
-        except Exception as e:
-            logger.error(f"Error buscando por PLU {plu}: {e}")
-            return None
-    
-    def buscar_por_nombre(self, termino):
-        """
-        Busca artículos por nombre (búsqueda parcial)
-        
-        Args:
-            termino (str): Término de búsqueda
-            
-        Returns:
-            list: Lista de artículos que coinciden
-        """
-        try:
-            return self.repositorio.buscar_por_nombre(termino)
-        except Exception as e:
-            logger.error(f"Error buscando por nombre {termino}: {e}")
+            logger.error(f"❌ Error obteniendo categorías: {e}")
             return []
+    
+    def __del__(self):
+        """Cierra conexiones al destruir el objeto"""
+        try:
+            if hasattr(self, 'repositorio') and self.repositorio:
+                if hasattr(self.repositorio, 'cerrar_conexion'):
+                    self.repositorio.cerrar_conexion()
+        except:
+            pass
