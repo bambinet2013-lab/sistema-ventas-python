@@ -107,7 +107,7 @@ class ArticuloRepositorio:
             logger.error(f"Error al buscar artículo por código {codigo}: {e}")
             return None
     
-    def crear(self, codigo, nombre, idcategoria, idpresentacion, descripcion=None, 
+    def crear(self, codigo_barra, nombre, idcategoria, idpresentacion, descripcion=None, 
               imagen=None, precio_venta=0, precio_referencia=None):
         """
         Inserta un nuevo artículo con precio de venta
@@ -474,4 +474,100 @@ class ArticuloRepositorio:
         except Exception as e:
             logger.error(f"❌ Error actualizando stock mínimo: {e}")
             self.conn.rollback()
+            return False
+
+    def actualizar_nombre(self, idarticulo: int, nuevo_nombre: str) -> bool:
+        """
+        Actualiza el nombre de un artículo en la base de datos
+        
+        Args:
+            idarticulo: ID del artículo
+            nuevo_nombre: Nuevo nombre
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.conn:
+                logger.error("❌ No hay conexión a la base de datos")
+                return False
+            
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Actualizar nombre
+            query = "UPDATE articulo SET nombre = ? WHERE idarticulo = ?"
+            cursor.execute(query, (nuevo_nombre, idarticulo))
+            
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Nombre actualizado en BD para artículo {idarticulo}: {nuevo_nombre}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando nombre en BD: {e}")
+            try:
+                self.conn.rollback()
+            except:
+                pass
+            return False
+
+    def actualizar_categoria(self, idarticulo: int, nueva_categoria: int) -> bool:
+        """
+        Actualiza la categoría de un artículo en la base de datos
+        
+        Args:
+            idarticulo: ID del artículo
+            nueva_categoria: ID de la nueva categoría
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.conn:
+                logger.error("❌ No hay conexión a la base de datos")
+                return False
+            
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Verificar que la categoría existe
+            cursor.execute("SELECT idcategoria FROM categoria WHERE idcategoria = ?", (nueva_categoria,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Categoría {nueva_categoria} no encontrada")
+                return False
+            
+            # Actualizar categoría
+            query = "UPDATE articulo SET idcategoria = ? WHERE idarticulo = ?"
+            cursor.execute(query, (nueva_categoria, idarticulo))
+            
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Categoría actualizada en BD para artículo {idarticulo}: {nueva_categoria}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando categoría en BD: {e}")
+            try:
+                self.conn.rollback()
+            except:
+                pass
             return False

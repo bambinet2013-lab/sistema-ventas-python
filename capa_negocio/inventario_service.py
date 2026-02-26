@@ -298,7 +298,7 @@ class InventarioService(BaseService):
                 return []
             
             # Obtener artículos usando el método correcto
-            articulos = self.articulo_service.listar_articulos()  # Cambiado de listar() a listar_articulos()
+            articulos = self.articulo_service.listar_articulos()
             
             if not articulos:
                 logger.info("📭 No hay artículos registrados")
@@ -309,6 +309,10 @@ class InventarioService(BaseService):
                 try:
                     stock = self.obtener_stock_articulo(art['idarticulo'])
                     art['stock_actual'] = stock
+                    
+                    # DEBUG - Ver qué campos tiene cada artículo
+                    logger.debug(f"Artículo {art['idarticulo']}: {art.get('codigo_barras', 'NO CODE')}")
+                    
                 except Exception as e:
                     logger.error(f"Error obteniendo stock para artículo {art['idarticulo']}: {e}")
                     art['stock_actual'] = 0

@@ -88,10 +88,10 @@ class ArticuloService(BaseService):
                        precio_venta: float, stock_minimo: int = 5,
                        precio_compra: float = 0, igtf: bool = False) -> Optional[int]:
         """
-        Crea un nuevo artículo
+        Crea un nuevo artículo con código profesional automático
         
         Args:
-            codigo_barras: Código de barras o PLU
+            codigo_barras: Código de barras del producto
             nombre: Nombre del artículo
             idcategoria: ID de la categoría
             precio_venta: Precio de venta en USD
@@ -119,32 +119,43 @@ class ArticuloService(BaseService):
                 logger.warning(f"⚠️ Precio de venta inválido: {precio_venta}")
                 return None
             
-            # Verificar si ya existe el código
-            existente = self.repositorio.buscar_por_codigo(codigo_barras)
-            if existente:
-                logger.warning(f"⚠️ Ya existe un artículo con código {codigo_barras}")
+            # GENERAR CÓDIGO PROFESIONAL AUTOMÁTICO
+            from capa_negocio.utils import generar_codigo_profesional
+            codigo = generar_codigo_profesional()
+            
+            # Verificar que el código generado no exista ya
+            intentos = 0
+            while self.repositorio.buscar_por_codigo(codigo) and intentos < 10:
+                codigo = generar_codigo_profesional()
+                intentos += 1
+            
+            if intentos >= 10:
+                logger.error("❌ No se pudo generar un código único después de 10 intentos")
                 return None
             
-            # Crear artículo
+            logger.info(f"🔑 Código profesional generado: {codigo}")
+            
+            # Crear artículo - CORREGIDO: pasar los parámetros correctos al repo
             idarticulo = self.repositorio.crear(
-                codigo_barras=codigo_barras,
+                codigo=codigo,                    # ← Código profesional generado
+                codigo_barras=codigo_barras,      # ← Código de barras original
                 nombre=nombre,
                 idcategoria=idcategoria,
+                idpresentacion=1,                  # Valor por defecto
                 precio_venta=precio_venta,
-                stock_minimo=stock_minimo,
-                precio_compra=precio_compra,
-                igtf=igtf
+                precio_referencia=precio_venta,
+                stock_minimo=stock_minimo
             )
             
             if idarticulo:
-                logger.info(f"✅ Artículo creado: {nombre} (ID: {idarticulo})")
+                logger.info(f"✅ Artículo creado: {nombre} (ID: {idarticulo}, Código: {codigo})")
                 
                 # Registrar en auditoría
                 self.registrar_auditoria(
                     accion='CREAR',
                     tabla='articulo',
                     registro_id=idarticulo,
-                    datos_nuevos=f"Código: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
+                    datos_nuevos=f"Código: {codigo}, Código barras: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
                 )
                 
             return idarticulo
@@ -341,6 +352,99 @@ class ArticuloService(BaseService):
             
         except Exception as e:
             logger.error(f"❌ Error actualizando stock mínimo: {e}")
+            return False
+
+    def actualizar_nombre(self, idarticulo: int, nuevo_nombre: str) -> bool:
+        """
+        Actualiza el nombre de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            nuevo_nombre: Nuevo nombre
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if not nuevo_nombre or nuevo_nombre.strip() == "":
+                logger.warning(f"⚠️ Nombre inválido: {nuevo_nombre}")
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Actualizar en repositorio
+            resultado = self.repositorio.actualizar_nombre(idarticulo, nuevo_nombre.strip())
+            
+            if resultado:
+                logger.info(f"✅ Nombre actualizado para artículo {idarticulo}: {nuevo_nombre}")
+                
+                # Registrar en auditoría
+                if hasattr(self, 'registrar_auditoria'):
+                    self.registrar_auditoria(
+                        accion='ACTUALIZAR_NOMBRE',
+                        tabla='articulo',
+                        registro_id=idarticulo,
+                        datos_anteriores=f"Nombre anterior: {datos_anteriores.get('nombre')}" if datos_anteriores else None,
+                        datos_nuevos=f"Nombre nuevo: {nuevo_nombre}"
+                    )
+                
+                return True
+            else:
+                logger.error(f"❌ Error actualizando nombre del artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en actualizar_nombre: {e}")
+            return False
+
+    def actualizar_categoria(self, idarticulo: int, nueva_categoria: int) -> bool:
+        """
+        Actualiza la categoría de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            nueva_categoria: ID de la nueva categoría
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if not self.validar_entero_positivo(nueva_categoria, "ID de categoría"):
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Actualizar en repositorio
+            resultado = self.repositorio.actualizar_categoria(idarticulo, nueva_categoria)
+            
+            if resultado:
+                logger.info(f"✅ Categoría actualizada para artículo {idarticulo}: {nueva_categoria}")
+                
+                # Registrar en auditoría
+                if hasattr(self, 'registrar_auditoria'):
+                    self.registrar_auditoria(
+                        accion='ACTUALIZAR_CATEGORIA',
+                        tabla='articulo',
+                        registro_id=idarticulo,
+                        datos_anteriores=f"Categoría anterior: {datos_anteriores.get('idcategoria')}" if datos_anteriores else None,
+                        datos_nuevos=f"Categoría nueva: {nueva_categoria}"
+                    )
+                
+                return True
+            else:
+                logger.error(f"❌ Error actualizando categoría del artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en actualizar_categoria: {e}")
             return False
 
     def obtener_categorias(self) -> List[Dict]:
