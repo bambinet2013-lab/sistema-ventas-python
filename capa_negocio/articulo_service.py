@@ -311,6 +311,38 @@ class ArticuloService(BaseService):
             logger.error(f"❌ Error en actualizar_precio: {e}")
             return False
     
+    def actualizar_stock_minimo(self, idarticulo, stock_minimo):
+        """
+        Actualiza el stock mínimo de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            stock_minimo: Nuevo stock mínimo
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if stock_minimo < 0:
+                logger.warning(f"⚠️ Stock mínimo inválido: {stock_minimo}")
+                return False
+            
+            resultado = self.repositorio.actualizar_stock_minimo(idarticulo, stock_minimo)
+            
+            if resultado:
+                logger.info(f"✅ Stock mínimo actualizado para artículo {idarticulo}: {stock_minimo}")
+            else:
+                logger.error(f"❌ Error actualizando stock mínimo en repositorio")
+            
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"❌ Error actualizando stock mínimo: {e}")
+            return False
+
     def obtener_categorias(self) -> List[Dict]:
         """
         Obtiene la lista de categorías

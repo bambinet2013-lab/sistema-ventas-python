@@ -452,3 +452,26 @@ class ArticuloRepositorio:
             except:
                 pass
             return False
+
+    def actualizar_stock_minimo(self, idarticulo, stock_minimo):
+        """
+        Actualiza el stock mínimo de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            stock_minimo: Nuevo stock mínimo
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = "UPDATE articulo SET stock_minimo = ? WHERE idarticulo = ?"
+            cursor.execute(query, (stock_minimo, idarticulo))
+            self.conn.commit()
+            logger.info(f"✅ Stock mínimo actualizado para artículo {idarticulo}: {stock_minimo}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error actualizando stock mínimo: {e}")
+            self.conn.rollback()
+            return False
