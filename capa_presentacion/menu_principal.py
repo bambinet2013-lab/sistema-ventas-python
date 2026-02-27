@@ -5140,7 +5140,7 @@ class SistemaVentas:
                     
                     items_recibidos.append({
                         'idarticulo': None,
-                        'codigo_barras': codigo_barras,  # Guardamos el código de barras
+                        'codigo': codigo_barras,
                         'nombre': nombre,
                         'categoria': categoria_nombre,
                         'idcategoria': idcategoria,
@@ -5308,6 +5308,11 @@ class SistemaVentas:
                     if item['es_nuevo']:
                         # Crear nuevo producto en BD
                         if hasattr(self.articulo_service, 'crear_articulo'):
+                            # DEBUG - Verificar que item tiene 'codigo'
+                            print(f"🔍 DEBUG - item tiene 'codigo': {'codigo' in item}")
+                            print(f"🔍 DEBUG - valor de item['codigo']: {item.get('codigo', 'NO EXISTE')}")
+                            print(f"🔍 DEBUG - Llamando a crear_articulo con codigo_barras={item['codigo']}")
+                            
                             nuevo_id = self.articulo_service.crear_articulo(
                                 codigo_barras=item['codigo'],  # ← Usa 'codigo' (el código de barras)
                                 nombre=item['nombre'],
@@ -5315,11 +5320,10 @@ class SistemaVentas:
                                 precio_venta=item['precio'],
                                 stock_minimo=5,
                                 precio_compra=item['precio'],
-                                igtf=False
                             )
                             
                             if nuevo_id:
-                                item['idarticulo'] = nuevo_id
+                                item['idarticulo'] = int(nuevo_id)
                                 productos_creados += 1
                                 print(f"{self.COLOR_VERDE}   ✅ Producto {item['nombre']} creado con ID {nuevo_id}{self.COLOR_RESET}")
                             else:
@@ -5332,7 +5336,7 @@ class SistemaVentas:
                     # Registrar movimiento en kardex
                     if item.get('idarticulo'):
                         resultado = inventario_service.registrar_movimiento(
-                            idarticulo=item['idarticulo'],
+                            idarticulo=int(item['idarticulo']), 
                             tipo_movimiento='ENTRADA',
                             cantidad=item['cantidad'],
                             referencia=f"RECEPCIÓN #{idrecepcion} - Orden: {orden_data['codigo_factura'] if orden_data else 'Directa'}",

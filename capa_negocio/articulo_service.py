@@ -86,7 +86,7 @@ class ArticuloService(BaseService):
     
     def crear_articulo(self, codigo_barras: str, nombre: str, idcategoria: int,
                        precio_venta: float, stock_minimo: int = 5,
-                       precio_compra: float = 0, igtf: bool = False) -> Optional[int]:
+                       precio_compra: float = 0) -> Optional[int]:
         """
         Crea un nuevo artículo con código profesional automático
         
@@ -123,11 +123,17 @@ class ArticuloService(BaseService):
             from capa_negocio.utils import generar_codigo_profesional
             codigo = generar_codigo_profesional()
             
+            # DEBUG - Ver código generado
+            logger.info(f"🔑 Código profesional generado: {codigo}")
+            print(f"🔍 DEBUG - Codigo profesional: {codigo}")
+            print(f"🔍 DEBUG - Codigo barras recibido: {codigo_barras}")
+            
             # Verificar que el código generado no exista ya
             intentos = 0
             while self.repositorio.buscar_por_codigo(codigo) and intentos < 10:
                 codigo = generar_codigo_profesional()
                 intentos += 1
+                print(f"🔍 DEBUG - Reintentando código: {codigo} (intento {intentos})")
             
             if intentos >= 10:
                 logger.error("❌ No se pudo generar un código único después de 10 intentos")
@@ -135,20 +141,21 @@ class ArticuloService(BaseService):
             
             logger.info(f"🔑 Código profesional generado: {codigo}")
             
-            # Crear artículo - CORREGIDO: pasar los parámetros correctos al repo
+            # Crear artículo
             idarticulo = self.repositorio.crear(
                 codigo=codigo,                    # ← Código profesional generado
-                codigo_barras=codigo_barras,      # ← Código de barras original
+                codigo_barras_original=codigo_barras,  # ← Código de barras original
                 nombre=nombre,
                 idcategoria=idcategoria,
                 idpresentacion=1,                  # Valor por defecto
                 precio_venta=precio_venta,
                 precio_referencia=precio_venta,
-                stock_minimo=stock_minimo
+                stock_minimo=stock_minimo,
             )
             
             if idarticulo:
                 logger.info(f"✅ Artículo creado: {nombre} (ID: {idarticulo}, Código: {codigo})")
+                print(f"🔍 DEBUG - Artículo creado con ID: {idarticulo}")
                 
                 # Registrar en auditoría
                 self.registrar_auditoria(
@@ -162,6 +169,7 @@ class ArticuloService(BaseService):
             
         except Exception as e:
             logger.error(f"❌ Error creando artículo: {e}")
+            print(f"🔍 DEBUG - Error en crear_articulo: {e}")
             return None
     
     def actualizar_articulo(self, idarticulo: int, codigo_barras: str, nombre: str,
@@ -209,7 +217,7 @@ class ArticuloService(BaseService):
             # Actualizar artículo
             resultado = self.repositorio.actualizar(
                 idarticulo=idarticulo,
-                codigo_barras=codigo_barras,
+                codigo_barras_original=codigo_barras,
                 nombre=nombre,
                 idcategoria=idcategoria,
                 precio_venta=precio_venta,
@@ -463,6 +471,41 @@ class ArticuloService(BaseService):
         except Exception as e:
             logger.error(f"❌ Error obteniendo categorías: {e}")
             return []
+
+    def registrar_auditoria(self, accion, tabla, registro_id, datos_nuevos=None, datos_anteriores=None):
+        """
+        Registra una acción en la tabla de auditoría
+        
+        Args:
+            accion: CREAR, ACTUALIZAR, ELIMINAR, etc.
+            tabla: Nombre de la tabla afectada
+            registro_id: ID del registro afectado
+            datos_nuevos: Nuevos valores (opcional)
+            datos_anteriores: Valores anteriores (opcional)
+        """
+        try:
+            # Por ahora, solo registramos en el log
+            logger.info(f"AUDITORÍA - {accion} en {tabla} ID {registro_id}")
+            if datos_nuevos:
+                logger.debug(f"  Nuevos datos: {datos_nuevos}")
+            if datos_anteriores:
+                logger.debug(f"  Datos anteriores: {datos_anteriores}")
+            
+            # Aquí puedes implementar el guardado en BD más adelante
+            # from capa_datos.auditoria_repo import AuditoriaRepositorio
+            # repo_auditoria = AuditoriaRepositorio()
+            # repo_auditoria.registrar(
+            #     usuario=obtener_usuario_actual(),
+            #     accion=accion,
+            #     tabla=tabla,
+            #     registro_id=registro_id,
+            #     datos_anteriores=datos_anteriores,
+            #     datos_nuevos=datos_nuevos
+            # )
+            
+        except Exception as e:
+            logger.error(f"Error registrando auditoría: {e}")
+            # No interrumpimos el flujo principal por un error de auditoría
     
     def __del__(self):
         """Cierra conexiones al destruir el objeto"""
