@@ -1,0 +1,1513 @@
+=== ESTRUCTURA BD ===
+-- ======================================================
+-- ACTUALIZACIÓN BASE DE DATOS PARA CUMPLIMIENTO SENIAT
+-- ======================================================
+USE SistemaVentas;
+GO
+
+-- 1. AGREGAR NUEVAS COLUMNAS A TABLA CLIENTE
+-- ======================================================
+PRINT 'Agregando columnas a tabla cliente...';
+
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'cliente' AND COLUMN_NAME = 'tipo_persona')
+BEGIN
+    ALTER TABLE cliente ADD tipo_persona VARCHAR(2) DEFAULT 'V';
+    PRINT '✅ Columna tipo_persona agregada';
+END
+ELSE
+    PRINT '⚠️ Columna tipo_persona ya existe';
+
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'cliente' AND COLUMN_NAME = 'contribuyente_iva')
+BEGIN
+    ALTER TABLE cliente ADD contribuyente_iva BIT DEFAULT 1;
+    PRINT '✅ Columna contribuyente_iva agregada';
+END
+ELSE
+    PRINT '⚠️ Columna contribuyente_iva ya existe';
+
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'cliente' AND COLUMN_NAME = 'excento_iva')
+BEGIN
+    ALTER TABLE cliente ADD excento_iva BIT DEFAULT 0;
+    PRINT '✅ Columna excento_iva agregada';
+END
+ELSE
+    PRINT '⚠️ Columna excento_iva ya existe';
+
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'cliente' AND COLUMN_NAME = 'retenedor_iva')
+BEGIN
+    ALTER TABLE cliente ADD retenedor_iva BIT DEFAULT 0;
+    PRINT '✅ Columna retenedor_iva agregada';
+END
+ELSE
+    PRINT '⚠️ Columna retenedor_iva ya existe';
+
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'cliente' AND COLUMN_NAME = 'bloqueado')
+BEGIN
+    ALTER TABLE cliente ADD bloqueado BIT DEFAULT 0;
+    PRINT '✅ Columna bloqueado agregada';
+END
+ELSE
+    PRINT '⚠️ Columna bloqueado ya existe';
+
+-- 2. INSERTAR CLIENTE CONSUMIDOR FINAL
+-- ======================================================
+PRINT '';
+PRINT 'Verificando cliente CONSUMIDOR FINAL...';
+
+IF NOT EXISTS (SELECT 1 FROM cliente WHERE tipo_documento = 'CF' AND num_documento = '')
+BEGIN
+    INSERT INTO cliente (
+        nombre, 
+        apellidos, 
+        tipo_documento, 
+        num_documento,
+        tipo_persona, 
+        contribuyente_iva, 
+        excento_iva, 
+        retenedor_iva, 
+        bloqueado
+    ) VALUES (
+        'CONSUMIDOR', 
+        'FINAL', 
+        'CF', 
+        '',
+        'CF', 
+        1,  -- Contribuyente IVA (SIEMPRE paga IVA)
+        0,  -- No excento
+        0,  -- No retenedor
+        1   -- Bloqueado (no editable)
+    );
+    PRINT '✅ Cliente CONSUMIDOR FINAL creado';
+END
+ELSE
+BEGIN
+    PRINT '⚠️ Cliente CONSUMIDOR FINAL ya existe';
+    
+    -- Actualizar si existe pero no tiene los campos nuevos
+    UPDATE cliente 
+    SET tipo_persona = 'CF',
+        contribuyente_iva = 1,
+        excento_iva = 0,
+        retenedor_iva = 0,
+        bloqueado = 1
+    WHERE tipo_documento = 'CF' AND num_documento = '';
+    
+    PRINT '✅ Cliente CONSUMIDOR FINAL actualizado';
+END
+
+-- 3. CREAR TABLA DE LOG DE AUDITORÍA
+-- ======================================================
+PRINT '';
+PRINT 'Creando tabla de log de auditoría...';
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name = 'log_auditoria' AND xtype = 'U')
+BEGIN
+    CREATE TABLE log_auditoria (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        usuario VARCHAR(100) NOT NULL,
+        accion VARCHAR(50) NOT NULL,
+        tabla_afectada VARCHAR(50) NOT NULL,
+        registro_id INT,
+        datos_anteriores TEXT,
+        datos_nuevos TEXT,
+        ip_address VARCHAR(45),
+        fecha_hora DATETIME DEFAULT GETDATE()
+    );
+    
+    -- Crear índices para búsquedas rápidas
+    CREATE INDEX IX_log_auditoria_fecha ON log_auditoria(fecha_hora);
+    CREATE INDEX IX_log_auditoria_usuario ON log_auditoria(usuario);
+    CREATE INDEX IX_log_auditoria_tabla ON log_auditoria(tabla_afectada);
+    
+    PRINT '✅ Tabla log_auditoria creada';
+END
+ELSE
+BEGIN
+    PRINT '⚠️ Tabla log_auditoria ya existe';
+END
+
+-- 4. CREAR TABLA DE CONTINGENCIA (PARA CUANDO FALLE INTERNET)
+-- ======================================================
+PRINT '';
+PRINT 'Creando tabla de facturas_contingencia...';
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name = 'facturas_contingencia' AND xtype = 'U')
+BEGIN
+    CREATE TABLE facturas_contingencia (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        factura_json TEXT NOT NULL,
+        fecha_creacion DATETIME DEFAULT GETDATE(),
+        sincronizada BIT DEFAULT 0,
+        fecha_sincronizacion DATETIME,
+        numero_intento INT DEFAULT 0,
+        error_mensaje TEXT
+    );
+    
+    CREATE INDEX IX_contingencia_sincronizada ON facturas_contingencia(sincronizada);
+    PRINT '✅ Tabla facturas_contingencia creada';
+END
+ELSE
+BEGIN
+    PRINT '⚠️ Tabla facturas_contingencia ya existe';
+END
+
+-- 5. MOSTRAR ESTRUCTURA FINAL
+-- ======================================================
+PRINT '';
+PRINT '=== VERIFICACIÓN FINAL ===';
+PRINT '';
+PRINT 'Columnas en tabla cliente:';
+SELECT 
+    COLUMN_NAME, 
+    DATA_TYPE, 
+    IS_NULLABLE 
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = 'cliente'
+ORDER BY ORDINAL_POSITION;
+
+PRINT '';
+PRINT 'Cliente CONSUMIDOR FINAL:';
+SELECT 
+    idcliente, 
+    nombre, 
+    apellidos, 
+    tipo_documento, 
+    num_documento, 
+    tipo_persona,
+    bloqueado
+FROM cliente 
+WHERE tipo_documento = 'CF';
+
+PRINT '';
+PRINT 'Tablas creadas:';
+SELECT 
+    name AS tabla,
+    create_date AS fecha_creacion
+FROM sys.tables 
+WHERE name IN ('log_auditoria', 'facturas_contingencia');
+
+PRINT '';
+PRINT '======================================================';
+PRINT '✅ ACTUALIZACIÓN COMPLETADA EXITOSAMENTE';
+PRINT '======================================================';
+GO
+-- ======================================================
+-- CREAR TABLA KARDEX PARA CONTROL DE INVENTARIO
+-- ======================================================
+USE SistemaVentas;
+
+-- 1. Crear tabla kardex si no existe
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name = 'kardex' AND xtype = 'U')
+BEGIN
+    CREATE TABLE kardex (
+        idkardex INT IDENTITY(1,1) PRIMARY KEY,
+        idarticulo INT NOT NULL,
+        tipo_movimiento VARCHAR(20) NOT NULL CHECK (tipo_movimiento IN ('INGRESO', 'VENTA', 'AJUSTE', 'DEVOLUCION')),
+        documento_referencia VARCHAR(50) NOT NULL,
+        cantidad INT NOT NULL,
+        stock_anterior INT NOT NULL,
+        stock_nuevo INT NOT NULL,
+        fecha_movimiento DATETIME DEFAULT GETDATE(),
+        CONSTRAINT FK_kardex_articulo FOREIGN KEY (idarticulo) REFERENCES articulo(idarticulo)
+    );
+    
+    -- Crear índices para búsquedas rápidas
+    CREATE INDEX IX_kardex_articulo ON kardex(idarticulo);
+    CREATE INDEX IX_kardex_fecha ON kardex(fecha_movimiento);
+    
+    PRINT '✅ Tabla kardex creada exitosamente';
+END
+ELSE
+BEGIN
+    PRINT '⚠️ La tabla kardex ya existe';
+END
+
+-- 2. Verificar estructura
+SELECT '📊 ESTRUCTURA DE KARDEX:' as ' ';
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE 
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = 'kardex'
+ORDER BY ORDINAL_POSITION;
+
+
+
+=== MODELO ARTICULO (REPO) ===
+"""
+Repositorio para la gestión de artículos en la base de datos
+"""
+from loguru import logger
+
+class ArticuloRepositorio:
+    """Clase que maneja las operaciones de base de datos para artículos"""
+    
+    def __init__(self, conn):
+        """
+        Inicializa el repositorio con una conexión a la base de datos
+        
+        Args:
+            conn: Conexión a la base de datos
+        """
+        self.conn = conn
+        logger.info("✅ ArticuloRepositorio inicializado")
+    
+    def listar(self):
+        """
+        Lista todos los artículos con sus precios
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
+                   a.idcategoria, c.nombre as categoria,
+                   a.idpresentacion, p.nombre as presentacion,
+                   a.precio_venta, a.precio_referencia
+            FROM articulo a
+            LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
+            LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            ORDER BY a.idarticulo DESC
+            """
+            cursor.execute(query)
+            
+            columns = [column[0] for column in cursor.description]
+            rows = cursor.fetchall()
+            result = []
+            
+            for row in rows:
+                item = dict(zip(columns, row))
+                result.append(item)
+            
+            logger.info(f"✅ {len(result)} artículos listados")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error al listar artículos: {e}")
+            return []
+    
+    def obtener_por_id(self, idarticulo):
+        """
+        Obtiene un artículo por su ID
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
+                   a.idcategoria, c.nombre as categoria,
+                   a.idpresentacion, p.nombre as presentacion,
+                   a.precio_venta, a.precio_referencia, a.stock_minimo,
+                   a.codigo_barras_original
+            FROM articulo a
+            LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
+            LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            WHERE a.idarticulo = ?
+            """
+            cursor.execute(query, (idarticulo,))
+            row = cursor.fetchone()
+            
+            if row:
+                columns = [column[0] for column in cursor.description]
+                return dict(zip(columns, row))
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error al obtener artículo por ID {idarticulo}: {e}")
+            return None
+    
+    def buscar_por_codigo(self, codigo):
+        """
+        Busca un artículo por su código de barras o código interno
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
+                   a.idcategoria, c.nombre as categoria,
+                   a.idpresentacion, p.nombre as presentacion,
+                   a.precio_venta, a.precio_referencia, a.stock_minimo,
+                   a.codigo_barras_original
+            FROM articulo a
+            LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
+            LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            WHERE a.codigo = ? OR a.codigo_barras_original = ?
+            """
+            cursor.execute(query, (codigo, codigo))
+            row = cursor.fetchone()
+            
+            if row:
+                columns = [column[0] for column in cursor.description]
+                return dict(zip(columns, row))
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error al buscar artículo por código {codigo}: {e}")
+            return None
+    
+    def buscar_por_plu(self, plu):
+        """
+        Busca un artículo por su PLU
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
+                   a.idcategoria, c.nombre as categoria,
+                   a.idpresentacion, p.nombre as presentacion,
+                   a.precio_venta, a.precio_referencia
+            FROM articulo a
+            LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
+            LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            WHERE a.plu = ?
+            """
+            cursor.execute(query, (plu,))
+            row = cursor.fetchone()
+            
+            if row:
+                columns = [column[0] for column in cursor.description]
+                return dict(zip(columns, row))
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error al buscar artículo por PLU {plu}: {e}")
+            return None
+    
+    def crear(self, codigo, nombre, idcategoria, idpresentacion, 
+              codigo_barras_original=None, descripcion=None, 
+              imagen=None, precio_venta=0, precio_referencia=None, 
+              stock_minimo=5):
+        """
+        Crea un nuevo artículo en la base de datos
+        
+        Args:
+            codigo: Código profesional del artículo
+            nombre: Nombre del artículo
+            idcategoria: ID de la categoría
+            idpresentacion: ID de la presentación
+            codigo_barras_original: Código de barras original
+            descripcion: Descripción del artículo
+            imagen: Imagen del artículo
+            precio_venta: Precio de venta
+            precio_referencia: Precio de referencia
+            stock_minimo: Stock mínimo
+            igtf: Aplica IGTF
+        """
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            INSERT INTO articulo 
+            (codigo, nombre, idcategoria, idpresentacion, codigo_barras_original,
+             descripcion, imagen, precio_venta, precio_referencia, stock_minimo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(query, (
+                codigo, nombre, idcategoria, idpresentacion, codigo_barras_original,
+                descripcion, imagen, precio_venta, precio_referencia, stock_minimo
+            ))
+            
+            # Obtener el ID del artículo insertado
+            cursor.execute("SELECT @@IDENTITY AS id")
+            row = cursor.fetchone()
+            idarticulo = row[0] if row else None
+            
+            self.conn.commit()
+            
+            logger.info(f"✅ Artículo creado con ID: {idarticulo} - Código: {codigo} - Precio: {precio_venta}")
+            return idarticulo
+            
+        except Exception as e:
+            logger.error(f"❌ Error al crear artículo: {e}")
+            self.conn.rollback()
+            return None
+    
+    def actualizar_precio(self, idarticulo, nuevo_precio):
+        """
+        Actualiza el precio de venta de un artículo
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Actualizar precio
+            query = "UPDATE articulo SET precio_venta = ? WHERE idarticulo = ?"
+            cursor.execute(query, (nuevo_precio, idarticulo))
+            
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Precio actualizado en BD para artículo {idarticulo}: {nuevo_precio}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando precio en BD: {e}")
+            self.conn.rollback()
+            return False
+    
+    def actualizar_stock_minimo(self, idarticulo, stock_minimo):
+        """
+        Actualiza el stock mínimo de un artículo
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Actualizar stock mínimo
+            query = "UPDATE articulo SET stock_minimo = ? WHERE idarticulo = ?"
+            cursor.execute(query, (stock_minimo, idarticulo))
+            
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Stock mínimo actualizado en BD para artículo {idarticulo}: {stock_minimo}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando stock mínimo en BD: {e}")
+            self.conn.rollback()
+            return False
+    
+    def actualizar_nombre(self, idarticulo, nuevo_nombre):
+        """
+        Actualiza el nombre de un artículo
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Actualizar nombre
+            query = "UPDATE articulo SET nombre = ? WHERE idarticulo = ?"
+            cursor.execute(query, (nuevo_nombre, idarticulo))
+            
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Nombre actualizado en BD para artículo {idarticulo}: {nuevo_nombre}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando nombre en BD: {e}")
+            self.conn.rollback()
+            return False
+    
+    def actualizar_categoria(self, idarticulo, nueva_categoria):
+        """
+        Actualiza la categoría de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            nueva_categoria: ID de la nueva categoría
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Verificar que el artículo existe
+            cursor.execute("SELECT idarticulo FROM articulo WHERE idarticulo = ?", (idarticulo,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Artículo {idarticulo} no encontrado")
+                return False
+            
+            # Verificar que la categoría existe
+            cursor.execute("SELECT idcategoria FROM categoria WHERE idcategoria = ?", (nueva_categoria,))
+            if not cursor.fetchone():
+                logger.warning(f"⚠️ Categoría {nueva_categoria} no encontrada")
+                return False
+            
+            # Actualizar categoría
+            query = "UPDATE articulo SET idcategoria = ? WHERE idarticulo = ?"
+            cursor.execute(query, (nueva_categoria, idarticulo))
+            
+            self.conn.commit()
+            
+            if cursor.rowcount > 0:
+                logger.info(f"✅ Categoría actualizada en BD para artículo {idarticulo}: {nueva_categoria}")
+                return True
+            else:
+                logger.warning(f"⚠️ No se actualizó ningún registro para artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error actualizando categoría en BD: {e}")
+            self.conn.rollback()
+            return False
+
+
+=== SERVICIO ARTICULO ===
+"""
+Servicio para gestión de artículos
+"""
+from loguru import logger
+from typing import List, Dict, Optional
+from capa_negocio.base_service import BaseService
+from capa_datos.articulo_repo import ArticuloRepositorio
+from capa_datos.categoria_repo import CategoriaRepositorio
+
+class ArticuloService(BaseService):
+    def __init__(self, repositorio: ArticuloRepositorio, categoria_service=None):
+        """
+        Inicializa el servicio de artículos
+        
+        Args:
+            repositorio: Repositorio de artículos
+            categoria_service: Servicio de categorías (opcional)
+        """
+        super().__init__()
+        self.repositorio = repositorio
+        self.categoria_service = categoria_service
+        
+    def listar_articulos(self) -> List[Dict]:
+        """
+        Lista todos los artículos
+        
+        Returns:
+            List[Dict]: Lista de artículos
+        """
+        try:
+            articulos = self.repositorio.listar()
+            logger.info(f"✅ {len(articulos)} artículos listados")
+            return articulos
+        except Exception as e:
+            logger.error(f"❌ Error listando artículos: {e}")
+            return []
+    
+    def buscar_por_id(self, idarticulo: int) -> Optional[Dict]:
+        """
+        Busca un artículo por su ID
+        
+        Args:
+            idarticulo: ID del artículo
+            
+        Returns:
+            Optional[Dict]: Artículo encontrado o None
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return None
+                
+            articulo = self.repositorio.obtener_por_id(idarticulo)
+            if articulo:
+                logger.info(f"✅ Artículo ID {idarticulo} encontrado: {articulo['nombre']}")
+            else:
+                logger.warning(f"⚠️ Artículo ID {idarticulo} no encontrado")
+            return articulo
+        except Exception as e:
+            logger.error(f"❌ Error buscando artículo {idarticulo}: {e}")
+            return None
+    
+    def buscar_por_codigo(self, codigo: str) -> Optional[Dict]:
+        """
+        Busca un artículo por su código de barras o PLU
+        
+        Args:
+            codigo: Código de barras o PLU
+            
+        Returns:
+            Optional[Dict]: Artículo encontrado o None
+        """
+        try:
+            if not codigo:
+                logger.warning("⚠️ Código vacío")
+                return None
+                
+            articulo = self.repositorio.buscar_por_codigo(codigo)
+            if articulo:
+                logger.info(f"✅ Artículo encontrado: {articulo['nombre']} (código: {codigo})")
+            else:
+                logger.debug(f"Artículo con código {codigo} no encontrado")
+            return articulo
+        except Exception as e:
+            logger.error(f"❌ Error buscando por código {codigo}: {e}")
+            return None
+    
+    def buscar_por_nombre(self, nombre):
+        """
+        Busca artículos por nombre (búsqueda parcial)
+        
+        Args:
+            nombre: Nombre o parte del nombre a buscar
+            
+        Returns:
+            list: Lista de artículos que coinciden con el nombre
+        """
+        try:
+            if not nombre:
+                logger.warning("⚠️ Nombre de búsqueda vacío")
+                return []
+            
+            # Obtener todos los artículos
+            articulos = self.listar_articulos()
+            resultados = []
+            
+            # Filtrar por nombre (búsqueda case-insensitive)
+            nombre_busqueda = nombre.lower()
+            for a in articulos:
+                if nombre_busqueda in a.get('nombre', '').lower():
+                    resultados.append(a)
+            
+            logger.info(f"✅ {len(resultados)} artículos encontrados para '{nombre}'")
+            return resultados
+            
+        except Exception as e:
+            logger.error(f"❌ Error buscando por nombre '{nombre}': {e}")
+            return []
+
+    def crear_articulo(self, codigo_barras: str, nombre: str, idcategoria: int,
+                       precio_venta: float, stock_minimo: int = 5,
+                       precio_compra: float = 0) -> Optional[int]:
+        """
+        Crea un nuevo artículo con código profesional automático
+        
+        Args:
+            codigo_barras: Código de barras del producto
+            nombre: Nombre del artículo
+            idcategoria: ID de la categoría
+            precio_venta: Precio de venta en USD
+            stock_minimo: Stock mínimo para alertas
+            precio_compra: Precio de compra (opcional)
+            igtf: Aplica IGTF (True/False)
+            
+        Returns:
+            Optional[int]: ID del artículo creado o None
+        """
+        try:
+            # Validaciones
+            if not codigo_barras:
+                logger.warning("⚠️ Código de barras obligatorio")
+                return None
+                
+            if not nombre:
+                logger.warning("⚠️ Nombre obligatorio")
+                return None
+                
+            if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
+                return None
+                
+            if precio_venta <= 0:
+                logger.warning(f"⚠️ Precio de venta inválido: {precio_venta}")
+                return None
+            
+            # GENERAR CÓDIGO PROFESIONAL AUTOMÁTICO
+            from capa_negocio.utils import generar_codigo_profesional
+            codigo = generar_codigo_profesional()
+            
+            # DEBUG - Ver código generado
+            logger.info(f"🔑 Código profesional generado: {codigo}")
+            print(f"🔍 DEBUG - Codigo profesional: {codigo}")
+            print(f"🔍 DEBUG - Codigo barras recibido: {codigo_barras}")
+            
+            # Verificar que el código generado no exista ya
+            intentos = 0
+            while self.repositorio.buscar_por_codigo(codigo) and intentos < 10:
+                codigo = generar_codigo_profesional()
+                intentos += 1
+                print(f"🔍 DEBUG - Reintentando código: {codigo} (intento {intentos})")
+            
+            if intentos >= 10:
+                logger.error("❌ No se pudo generar un código único después de 10 intentos")
+                return None
+            
+            logger.info(f"🔑 Código profesional generado: {codigo}")
+            
+            # Crear artículo
+            idarticulo = self.repositorio.crear(
+                codigo=codigo,                    # ← Código profesional generado
+                codigo_barras_original=codigo_barras,  # ← Código de barras original
+                nombre=nombre,
+                idcategoria=idcategoria,
+                idpresentacion=1,                  # Valor por defecto
+                precio_venta=precio_venta,
+                precio_referencia=precio_venta,
+                stock_minimo=stock_minimo,
+            )
+            
+            if idarticulo:
+                logger.info(f"✅ Artículo creado: {nombre} (ID: {idarticulo}, Código: {codigo})")
+                print(f"🔍 DEBUG - Artículo creado con ID: {idarticulo}")
+                
+                # Registrar en auditoría
+                self.registrar_auditoria(
+                    accion='CREAR',
+                    tabla='articulo',
+                    registro_id=idarticulo,
+                    datos_nuevos=f"Código: {codigo}, Código barras: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
+                )
+                
+            return idarticulo
+            
+        except Exception as e:
+            logger.error(f"❌ Error creando artículo: {e}")
+            print(f"🔍 DEBUG - Error en crear_articulo: {e}")
+            return None
+    
+    def actualizar_articulo(self, idarticulo: int, codigo_barras: str, nombre: str,
+                            idcategoria: int, precio_venta: float, stock_minimo: int = 5,
+                            precio_compra: float = 0, igtf: bool = False) -> bool:
+        """
+        Actualiza un artículo existente
+        
+        Args:
+            idarticulo: ID del artículo a actualizar
+            codigo_barras: Nuevo código de barras
+            nombre: Nuevo nombre
+            idcategoria: Nueva categoría
+            precio_venta: Nuevo precio de venta
+            stock_minimo: Nuevo stock mínimo
+            precio_compra: Nuevo precio de compra
+            igtf: Nuevo estado de IGTF
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            # Validaciones
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+                
+            if not codigo_barras:
+                logger.warning("⚠️ Código de barras obligatorio")
+                return False
+                
+            if not nombre:
+                logger.warning("⚠️ Nombre obligatorio")
+                return False
+                
+            if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
+                return False
+                
+            if precio_venta <= 0:
+                logger.warning(f"⚠️ Precio de venta inválido: {precio_venta}")
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Actualizar artículo
+            resultado = self.repositorio.actualizar(
+                idarticulo=idarticulo,
+                codigo_barras_original=codigo_barras,
+                nombre=nombre,
+                idcategoria=idcategoria,
+                precio_venta=precio_venta,
+                stock_minimo=stock_minimo,
+                precio_compra=precio_compra,
+                igtf=igtf
+            )
+            
+            if resultado:
+                logger.info(f"✅ Artículo {idarticulo} actualizado")
+                
+                # Registrar en auditoría
+                self.registrar_auditoria(
+                    accion='ACTUALIZAR',
+                    tabla='articulo',
+                    registro_id=idarticulo,
+                    datos_anteriores=str(datos_anteriores) if datos_anteriores else None,
+                    datos_nuevos=f"Código: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
+                )
+                
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"❌ Error actualizando artículo {idarticulo}: {e}")
+            return False
+    
+    def eliminar_articulo(self, idarticulo: int) -> bool:
+        """
+        Elimina un artículo (marca como inactivo)
+        
+        Args:
+            idarticulo: ID del artículo a eliminar
+            
+        Returns:
+            bool: True si se eliminó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            # Obtener datos para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            resultado = self.repositorio.eliminar(idarticulo)
+            
+            if resultado:
+                logger.info(f"✅ Artículo {idarticulo} eliminado")
+                
+                # Registrar en auditoría
+                self.registrar_auditoria(
+                    accion='ELIMINAR',
+                    tabla='articulo',
+                    registro_id=idarticulo,
+                    datos_anteriores=str(datos_anteriores) if datos_anteriores else None
+                )
+                
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"❌ Error eliminando artículo {idarticulo}: {e}")
+            return False
+    
+    def actualizar_precio(self, idarticulo: int, nuevo_precio: float) -> bool:
+        """
+        Actualiza el precio de venta de un artículo
+        
+        Args:
+            idarticulo (int): ID del artículo a actualizar
+            nuevo_precio (float): Nuevo precio en USD
+            
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            # Validar ID
+            if not idarticulo or idarticulo <= 0:
+                logger.warning(f"⚠️ ID de artículo inválido: {idarticulo}")
+                return False
+            
+            # Validar precio
+            if nuevo_precio <= 0:
+                logger.warning(f"⚠️ Precio inválido: {nuevo_precio}")
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Llamar al repositorio para actualizar
+            resultado = self.repositorio.actualizar_precio(idarticulo, nuevo_precio)
+            
+            if resultado:
+                logger.info(f"✅ Precio actualizado para artículo {idarticulo}: ${nuevo_precio:.2f}")
+                
+                # Registrar en auditoría si existe el método
+                if hasattr(self, 'registrar_auditoria'):
+                    self.registrar_auditoria(
+                        accion='ACTUALIZAR_PRECIO',
+                        tabla='articulo',
+                        registro_id=idarticulo,
+                        datos_anteriores=f"Precio anterior: ${datos_anteriores.get('precio_venta', 0):.2f}" if datos_anteriores else None,
+                        datos_nuevos=f"Precio nuevo: ${nuevo_precio:.2f}"
+                    )
+                
+                return True
+            else:
+                logger.error(f"❌ Error actualizando precio del artículo {idarticulo} en repositorio")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en actualizar_precio: {e}")
+            return False
+    
+    def actualizar_stock_minimo(self, idarticulo, stock_minimo):
+        """
+        Actualiza el stock mínimo de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            stock_minimo: Nuevo stock mínimo
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if stock_minimo < 0:
+                logger.warning(f"⚠️ Stock mínimo inválido: {stock_minimo}")
+                return False
+            
+            resultado = self.repositorio.actualizar_stock_minimo(idarticulo, stock_minimo)
+            
+            if resultado:
+                logger.info(f"✅ Stock mínimo actualizado para artículo {idarticulo}: {stock_minimo}")
+            else:
+                logger.error(f"❌ Error actualizando stock mínimo en repositorio")
+            
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"❌ Error actualizando stock mínimo: {e}")
+            return False
+
+    def actualizar_nombre(self, idarticulo: int, nuevo_nombre: str) -> bool:
+        """
+        Actualiza el nombre de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            nuevo_nombre: Nuevo nombre
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if not nuevo_nombre or nuevo_nombre.strip() == "":
+                logger.warning(f"⚠️ Nombre inválido: {nuevo_nombre}")
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Actualizar en repositorio
+            resultado = self.repositorio.actualizar_nombre(idarticulo, nuevo_nombre.strip())
+            
+            if resultado:
+                logger.info(f"✅ Nombre actualizado para artículo {idarticulo}: {nuevo_nombre}")
+                
+                # Registrar en auditoría
+                if hasattr(self, 'registrar_auditoria'):
+                    self.registrar_auditoria(
+                        accion='ACTUALIZAR_NOMBRE',
+                        tabla='articulo',
+                        registro_id=idarticulo,
+                        datos_anteriores=f"Nombre anterior: {datos_anteriores.get('nombre')}" if datos_anteriores else None,
+                        datos_nuevos=f"Nombre nuevo: {nuevo_nombre}"
+                    )
+                
+                return True
+            else:
+                logger.error(f"❌ Error actualizando nombre del artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en actualizar_nombre: {e}")
+            return False
+
+    def actualizar_categoria(self, idarticulo: int, nueva_categoria: int) -> bool:
+        """
+        Actualiza la categoría de un artículo
+        
+        Args:
+            idarticulo: ID del artículo
+            nueva_categoria: ID de la nueva categoría
+            
+        Returns:
+            bool: True si se actualizó correctamente
+        """
+        try:
+            if not self.validar_entero_positivo(idarticulo, "ID del artículo"):
+                return False
+            
+            if not self.validar_entero_positivo(nueva_categoria, "ID de categoría"):
+                return False
+            
+            # Obtener datos anteriores para auditoría
+            datos_anteriores = self.repositorio.obtener_por_id(idarticulo)
+            
+            # Actualizar en repositorio
+            resultado = self.repositorio.actualizar_categoria(idarticulo, nueva_categoria)
+            
+            if resultado:
+                logger.info(f"✅ Categoría actualizada para artículo {idarticulo}: {nueva_categoria}")
+                
+                # Registrar en auditoría
+                if hasattr(self, 'registrar_auditoria'):
+                    self.registrar_auditoria(
+                        accion='ACTUALIZAR_CATEGORIA',
+                        tabla='articulo',
+                        registro_id=idarticulo,
+                        datos_anteriores=f"Categoría anterior: {datos_anteriores.get('idcategoria')}" if datos_anteriores else None,
+                        datos_nuevos=f"Categoría nueva: {nueva_categoria}"
+                    )
+                
+                return True
+            else:
+                logger.error(f"❌ Error actualizando categoría del artículo {idarticulo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en actualizar_categoria: {e}")
+            return False
+
+    def obtener_categorias(self) -> List[Dict]:
+        """
+        Obtiene la lista de categorías
+        
+        Returns:
+            List[Dict]: Lista de categorías
+        """
+        try:
+            if self.categoria_service:
+                return self.categoria_service.listar_categorias()
+            else:
+                logger.warning("⚠️ Servicio de categorías no disponible")
+                return []
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo categorías: {e}")
+            return []
+
+    def registrar_auditoria(self, accion, tabla, registro_id, datos_nuevos=None, datos_anteriores=None):
+        """
+        Registra una acción en la tabla de auditoría
+        
+        Args:
+            accion: CREAR, ACTUALIZAR, ELIMINAR, etc.
+            tabla: Nombre de la tabla afectada
+            registro_id: ID del registro afectado
+            datos_nuevos: Nuevos valores (opcional)
+            datos_anteriores: Valores anteriores (opcional)
+        """
+        try:
+            # Por ahora, solo registramos en el log
+            logger.info(f"AUDITORÍA - {accion} en {tabla} ID {registro_id}")
+            if datos_nuevos:
+                logger.debug(f"  Nuevos datos: {datos_nuevos}")
+            if datos_anteriores:
+                logger.debug(f"  Datos anteriores: {datos_anteriores}")
+            
+            # Aquí puedes implementar el guardado en BD más adelante
+            # from capa_datos.auditoria_repo import AuditoriaRepositorio
+            # repo_auditoria = AuditoriaRepositorio()
+            # repo_auditoria.registrar(
+            #     usuario=obtener_usuario_actual(),
+            #     accion=accion,
+            #     tabla=tabla,
+            #     registro_id=registro_id,
+            #     datos_anteriores=datos_anteriores,
+            #     datos_nuevos=datos_nuevos
+            # )
+            
+        except Exception as e:
+            logger.error(f"Error registrando auditoría: {e}")
+            # No interrumpimos el flujo principal por un error de auditoría
+    
+    def __del__(self):
+        """Cierra conexiones al destruir el objeto"""
+        try:
+            if hasattr(self, 'repositorio') and self.repositorio:
+                if hasattr(self.repositorio, 'cerrar_conexion'):
+                    self.repositorio.cerrar_conexion()
+        except:
+            pass
+
+
+=== RECEPCIÓN MERCANCÍA (MENÚ) ===
+4235:                self._recibir_mercancia()
+4236-            elif opcion == '3':
+4237-                self._listar_ordenes_compra()
+4238-            elif opcion == '4':
+4239-                self._buscar_orden_factura()
+4240-            elif opcion == '5':
+4241-                self._listar_recepciones()
+4242-            elif opcion == '6':
+4243-                self._reportes_compras()
+4244-            elif opcion == '0':
+4245-                break
+4246-            else:
+4247-                print(f"{self.COLOR_ROJO}❌ Opción inválida{self.COLOR_RESET}")
+4248-                self.pausa()
+4249-
+4250-    def _registrar_compra(self):
+4251-        """Registra una nueva orden de compra (PASO 1 COMPLETO)"""
+4252-        self.mostrar_cabecera("📄 NUEVA COMPRA")
+4253-        
+4254-        # Verificar usuario
+4255-        usuario = self.trabajador_service.get_usuario_actual()
+4256-        if not usuario:
+4257-            print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión{self.COLOR_RESET}")
+4258-            self.pausa()
+4259-            return
+4260-        
+4261-        # 1. CÓDIGO FACTURA
+4262-        print(f"\n{self.COLOR_AMARILLO}1. CÓDIGO FACTURA (obligatorio){self.COLOR_RESET}")
+4263-        print("   Ingrese código de la factura (será el identificador único de la orden)")
+4264-        codigo_factura = input("   Código Factura: ").strip().upper()
+4265-        if not codigo_factura:
+4266-            print(f"{self.COLOR_ROJO}❌ Código de factura obligatorio{self.COLOR_RESET}")
+4267-            self.pausa()
+4268-            return
+4269-        
+4270-        # 2. PROVEEDOR
+4271-        print(f"\n{self.COLOR_AMARILLO}2. PROVEEDOR{self.COLOR_RESET}")
+4272-        print("   [1] Seleccionar de la lista")
+4273-        print("   [2] Crear nuevo proveedor")
+4274-        print("   [0] Cancelar")
+4275-        
+4276-        opcion_prov = input("\n   Seleccione: ")
+4277-        
+4278-        if opcion_prov == '0':
+4279-            return
+4280-            
+4281-        idproveedor = None
+4282-        proveedor_data = None
+4283-        
+4284-        if opcion_prov == '1':
+4285-            # Listar proveedores existentes
+4286-            proveedores = self.proveedor_service.listar()
+4287-            if not proveedores:
+4288-                print(f"\n{self.COLOR_ROJO}❌ No hay proveedores registrados{self.COLOR_RESET}")
+4289-                print(f"{self.COLOR_AMARILLO}   Debe crear un proveedor primero{self.COLOR_RESET}")
+4290-                self.pausa()
+4291-                return
+4292-            
+4293-            print(f"\n{self.COLOR_VERDE}   Proveedores disponibles:{self.COLOR_RESET}")
+4294-            for i, p in enumerate(proveedores[:10], 1):
+4295-                razon = p.get('razon_social', 'N/A')
+4296-                rif = p.get('num_documento', 'N/A')
+4297-                print(f"   {i}. {razon} - {rif}")
+4298-            print(f"   {self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+4299-            
+4300-            try:
+4301-                idx = int(input("\n   Seleccione número: ")) - 1
+4302-                if idx == -1:
+4303-                    return
+4304-                proveedor_data = proveedores[idx]
+4305-                idproveedor = proveedor_data['idproveedor']
+4306-                print(f"{self.COLOR_VERDE}   ✅ Proveedor seleccionado: {proveedor_data.get('razon_social')}{self.COLOR_RESET}")
+4307-            except (ValueError, IndexError):
+4308-                print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+4309-                self.pausa()
+4310-                return
+4311-                
+4312-        elif opcion_prov == '2':
+4313-            # Crear nuevo proveedor
+4314-            print(f"\n{self.COLOR_AMARILLO}   📝 NUEVO PROVEEDOR{self.COLOR_RESET}")
+4315-            
+4316-            # Validar RIF
+4317-            rif = input("   RIF: ").upper()
+4318-            if not rif:
+4319-                print(f"{self.COLOR_ROJO}❌ RIF obligatorio{self.COLOR_RESET}")
+4320-                self.pausa()
+4321-                return
+4322-            
+4323-            # Validar Razón Social
+4324-            razon = input("   Razón Social: ")
+4325-            if not razon:
+4326-                print(f"{self.COLOR_ROJO}❌ Razón Social obligatoria{self.COLOR_RESET}")
+4327-                self.pausa()
+4328-                return
+4329-            
+4330-            # Datos opcionales
+4331-            telefono = input("   Teléfono (opcional): ").strip() or None
+4332-            email = input("   Email (opcional): ").strip() or None
+4333-            direccion = input("   Dirección (opcional): ").strip() or None
+4334-            
+4335-            # Aquí iría la lógica real para crear proveedor
+4336-            # Por ahora simulamos
+4337-            print(f"\n{self.COLOR_VERDE}   ✅ Proveedor creado exitosamente (simulado){self.COLOR_RESET}")
+4338-            print(f"      RIF: {rif}")
+4339-            print(f"      Razón Social: {razon}")
+4340-            
+4341-            # Simular datos del proveedor creado
+4342-            proveedor_data = {
+4343-                'idproveedor': 999,  # ID simulado
+4344-                'razon_social': razon,
+4345-                'num_documento': rif
+4346-            }
+4347-            idproveedor = 999
+4348-            
+4349-            # Preguntar si quiere continuar con la compra
+4350-            print(f"\n{self.COLOR_AMARILLO}   ¿Continuar con el registro de compra?{self.COLOR_RESET}")
+4351-            continuar = input("   [S/N]: ").upper()
+4352-            if continuar != 'S':
+4353-                return
+4354-        
+4355-        # 3. MONTO TOTAL USD
+4356-        print(f"\n{self.COLOR_AMARILLO}3. MONTO TOTAL USD (obligatorio){self.COLOR_RESET}")
+4357-        try:
+4358-            monto_usd = float(input("   Ingrese monto total en USD: "))
+4359-            if monto_usd <= 0:
+4360-                print(f"{self.COLOR_ROJO}❌ Monto inválido{self.COLOR_RESET}")
+4361-                self.pausa()
+4362-                return
+4363-        except ValueError:
+4364-            print(f"{self.COLOR_ROJO}❌ Valor inválido{self.COLOR_RESET}")
+4365-            self.pausa()
+4366-            return
+4367-        
+4368-        # Obtener tasa del día - CORREGIDO DEFINITIVO
+4369-        from capa_negocio.tasa_service import TasaService
+4370-        from capa_datos.tasa_repo import TasaRepositorio
+4371-        from capa_datos.conexion import ConexionDB
+4372-        
+4373-        try:
+4374-            # Crear conexión y repositorio de tasa
+4375-            db_tasa = ConexionDB()
+4376-            conn_tasa = db_tasa.conectar()
+4377-            if conn_tasa:
+4378-                tasa_repo = TasaRepositorio(conn_tasa)
+4379-                tasa_service = TasaService(tasa_repo)
+4380-                tasa = tasa_service.obtener_tasa_del_dia('USD')
+4381-                
+4382-                if tasa and tasa > 0:
+4383-                    monto_bs = monto_usd * tasa
+4384-                    print(f"   Tasa BCV del día: {self.COLOR_VERDE}{tasa:.2f}{self.COLOR_RESET} Bs/USD")
+4385-                    print(f"   Monto en Bs: {self.COLOR_AMARILLO}{monto_bs:,.2f}{self.COLOR_RESET}")
+4386-                else:
+4387-                    print(f"   {self.COLOR_AMARILLO}⚠️ No se pudo obtener la tasa del día{self.COLOR_RESET}")
+4388-                    tasa = None
+4389-                
+4390-                # Cerrar conexión de tasa
+4391-                db_tasa.cerrar()
+4392-            else:
+4393-                print(f"   {self.COLOR_AMARILLO}⚠️ No se pudo conectar para obtener tasa{self.COLOR_RESET}")
+4394-                tasa = None
+4395-                
+4396-        except Exception as e:
+4397-            print(f"   {self.COLOR_AMARILLO}⚠️ Error al obtener tasa: {e}{self.COLOR_RESET}")
+4398-            tasa = None
+4399-        
+4400-        # 4. FECHA DE LA COMPRA
+4401-        print(f"\n{self.COLOR_AMARILLO}4. FECHA DE LA COMPRA{self.COLOR_RESET}")
+4402-        from datetime import datetime
+4403-        fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+4404-        fecha_compra_input = input(f"   Fecha (DD/MM/YYYY) [HOY={fecha_hoy}]: ").strip()
+4405-        
+4406-        if not fecha_compra_input:
+4407-            fecha_compra_input = fecha_hoy
+4408-        
+4409-        # Convertir de DD/MM/YYYY a YYYY-MM-DD para la BD
+4410-        try:
+4411-            dia, mes, anio = fecha_compra_input.split('/')
+4412-            # Validar que sea una fecha válida
+4413-            dia = int(dia)
+4414-            mes = int(mes)
+4415-            anio = int(anio)
+4416-            
+4417-            # Validación básica
+4418-            if dia < 1 or dia > 31 or mes < 1 or mes > 12 or anio < 2000 or anio > 2100:
+4419-                print(f"{self.COLOR_ROJO}❌ Fecha inválida{self.COLOR_RESET}")
+4420-                self.pausa()
+4421-                return
+4422-                
+4423-            fecha_compra = f"{anio:04d}-{mes:02d}-{dia:02d}"
+4424-            print(f"   {self.COLOR_VERDE}✅ Fecha registrada: {fecha_compra_input}{self.COLOR_RESET}")
+4425-        except (ValueError, IndexError):
+4426-            print(f"{self.COLOR_ROJO}❌ Formato de fecha inválido. Use DD/MM/YYYY (ejemplo: 25/02/2026){self.COLOR_RESET}")
+4427-            self.pausa()
+4428-            return
+4429-        
+4430-        # 5. FECHA ESTIMADA DE LLEGADA (opcional)
+4431-        print(f"\n{self.COLOR_AMARILLO}5. FECHA ESTIMADA DE LLEGADA (opcional){self.COLOR_RESET}")
+4432-        fecha_llegada_input = input("   Fecha estimada (DD/MM/YYYY) [Enter para omitir]: ").strip()
+4433-        
+4434-        fecha_llegada = None
+4435-        if fecha_llegada_input:
+--
+4694:    def _recibir_mercancia(self):
+4695-        """Registra recepción de mercancía (PASO 2 COMPLETO)"""
+4696-        self.mostrar_cabecera("📦 RECIBIR MERCANCÍA")
+4697-        
+4698-        # Verificar usuario
+4699-        usuario = self.trabajador_service.get_usuario_actual()
+4700-        if not usuario:
+4701-            print(f"{self.COLOR_ROJO}❌ Debe iniciar sesión{self.COLOR_RESET}")
+4702-            self.pausa()
+4703-            return
+4704-        
+4705-        # 1. BUSCAR ORDEN DE COMPRA
+4706-        print(f"\n{self.COLOR_AMARILLO}1. BUSCAR ORDEN DE COMPRA{self.COLOR_RESET}")
+4707-        print("   [1] Buscar por código de factura")
+4708-        print("   [2] Buscar por proveedor")
+4709-        print("   [3] Ver órdenes pendientes")
+4710-        print("   [4] Recepción directa (sin orden)")
+4711-        print("   [0] Cancelar")
+4712-        
+4713-        opcion = input("\n   Seleccione: ")
+4714-        
+4715-        if opcion == '0':
+4716-            return
+4717-        
+4718-        orden_data = None
+4719-        idorden = None
+4720-        idproveedor = None
+4721-        
+4722-        try:
+4723-            from capa_negocio.orden_compra_service import OrdenCompraService
+4724-            orden_service = OrdenCompraService()
+4725-            
+4726-            if opcion == '1':
+4727-                codigo = input("   Ingrese código de factura: ").strip().upper()
+4728-                if not codigo:
+4729-                    return
+4730-                orden_data = orden_service.buscar_por_codigo_factura(codigo)
+4731-                if not orden_data:
+4732-                    print(f"{self.COLOR_ROJO}❌ Orden no encontrada{self.COLOR_RESET}")
+4733-                    self.pausa()
+4734-                    return
+4735-                
+4736-                print(f"\n{self.COLOR_VERDE}   ✅ Orden encontrada:{self.COLOR_RESET}")
+4737-                print(f"   {'-'*60}")
+4738-                print(f"   Código: {orden_data['codigo_factura']}")
+4739-                print(f"   Proveedor: {orden_data['proveedor']} ({orden_data.get('rif', 'N/A')})")
+4740-                print(f"   Fecha compra: {orden_data['fecha_compra']}")
+4741-                print(f"   Monto USD: {orden_data['monto_total_usd']:,.2f}")
+4742-                print(f"   Estatus: {orden_data['estatus']}")
+4743-                print(f"   {'-'*60}")
+4744-                
+4745-                idorden = orden_data['idorden']
+4746-                idproveedor = orden_data['idproveedor']
+4747-                
+4748-            elif opcion == '2':
+4749-                print(f"\n{self.COLOR_AMARILLO}   🔍 BUSCAR POR PROVEEDOR{self.COLOR_RESET}")
+4750-                print("   [1] Buscar por RIF")
+4751-                print("   [2] Buscar por nombre")
+4752-                print("   [3] Listar todos")
+4753-                subopcion = input("\n   Seleccione: ")
+4754-                
+4755-                proveedores = []
+4756-                if subopcion == '1':
+4757-                    rif = input("   RIF: ").upper()
+4758-                    proveedor = self.proveedor_service.buscar_por_rif(rif)
+4759-                    if proveedor:
+4760-                        proveedores = [proveedor]
+4761-                elif subopcion == '2':
+4762-                    nombre = input("   Nombre/Razón social: ")
+4763-                    proveedores = self.proveedor_service.buscar_por_nombre(nombre)
+4764-                elif subopcion == '3':
+4765-                    proveedores = self.proveedor_service.listar()
+4766-                
+4767-                if not proveedores:
+4768-                    print(f"{self.COLOR_ROJO}❌ No se encontraron proveedores{self.COLOR_RESET}")
+4769-                    self.pausa()
+4770-                    return
+4771-                
+4772-                print(f"\n{self.COLOR_VERDE}   Proveedores encontrados:{self.COLOR_RESET}")
+4773-                for i, p in enumerate(proveedores[:10], 1):
+4774-                    print(f"   {i}. {p.get('razon_social', 'N/A')} - {p.get('num_documento', 'N/A')}")
+4775-                print(f"   {self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+4776-                
+4777-                try:
+4778-                    idx = int(input("\n   Seleccione proveedor: ")) - 1
+4779-                    if idx == -1:
+4780-                        return
+4781-                    proveedor_sel = proveedores[idx]
+4782-                    idproveedor = proveedor_sel['idproveedor']
+4783-                    
+4784-                    # Buscar órdenes de este proveedor
+4785-                    ordenes = orden_service.listar_ordenes_pendientes()
+4786-                    ordenes_proveedor = [o for o in ordenes if o.get('idproveedor') == idproveedor]
+4787-                    
+4788-                    if not ordenes_proveedor:
+4789-                        print(f"{self.COLOR_AMARILLO}   📭 No hay órdenes pendientes para este proveedor{self.COLOR_RESET}")
+4790-                        self.pausa()
+4791-                        return
+4792-                    
+4793-                    print(f"\n{self.COLOR_VERDE}   Órdenes pendientes:{self.COLOR_RESET}")
+4794-                    for i, o in enumerate(ordenes_proveedor[:10], 1):
+4795-                        print(f"   {i}. {o['codigo_factura']} - USD {o['monto_total_usd']:,.2f}")
+4796-                    print(f"   {self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+4797-                    
+4798-                    try:
+4799-                        idx_ord = int(input("\n   Seleccione orden: ")) - 1
+4800-                        if idx_ord == -1:
+4801-                            return
+4802-                        orden_data = ordenes_proveedor[idx_ord]
+4803-                        idorden = orden_data['idorden']
+4804-                        
+4805-                        print(f"\n{self.COLOR_VERDE}   ✅ Orden seleccionada:{self.COLOR_RESET}")
+4806-                        print(f"   Código: {orden_data['codigo_factura']}")
+4807-                    except (ValueError, IndexError):
+4808-                        print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+4809-                        self.pausa()
+4810-                        return
+4811-                        
+4812-                except (ValueError, IndexError):
+4813-                    print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+4814-                    self.pausa()
+4815-                    return
+4816-                
+4817-            elif opcion == '3':
+4818-                ordenes = orden_service.listar_ordenes_pendientes()
+4819-                if not ordenes:
+4820-                    print(f"{self.COLOR_AMARILLO}   📭 No hay órdenes pendientes{self.COLOR_RESET}")
+4821-                    self.pausa()
+4822-                    return
+4823-                
+4824-                print(f"\n{self.COLOR_VERDE}   Órdenes pendientes:{self.COLOR_RESET}")
+4825-                for i, o in enumerate(ordenes[:10], 1):
+4826-                    print(f"   {i}. {o['codigo_factura']} - {o['proveedor']} - USD {o['monto_total_usd']:,.2f}")
+4827-                print(f"   {self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+4828-                
+4829-                try:
+4830-                    idx = int(input("\n   Seleccione orden: ")) - 1
+4831-                    if idx == -1:
+4832-                        return
+4833-                    orden_data = ordenes[idx]
+4834-                    idorden = orden_data['idorden']
+4835-                    idproveedor = orden_data['idproveedor']
+4836-                    
+4837-                    print(f"\n{self.COLOR_VERDE}   ✅ Orden seleccionada:{self.COLOR_RESET}")
+4838-                    print(f"   Código: {orden_data['codigo_factura']}")
+4839-                    print(f"   Proveedor: {orden_data['proveedor']}")
+4840-                except (ValueError, IndexError):
+4841-                    print(f"{self.COLOR_ROJO}❌ Selección inválida{self.COLOR_RESET}")
+4842-                    self.pausa()
+4843-                    return
+4844-                    
+4845-            elif opcion == '4':
+4846-                # Recepción directa: buscar proveedor
+4847-                print(f"\n{self.COLOR_AMARILLO}   🔍 BUSCAR PROVEEDOR (recepción directa){self.COLOR_RESET}")
+4848-                print("   [1] Buscar por RIF")
+4849-                print("   [2] Buscar por nombre")
+4850-                print("   [3] Listar todos")
+4851-                print("   [4] Crear nuevo proveedor")
+4852-                subopcion = input("\n   Seleccione: ")
+4853-                
+4854-                if subopcion == '4':
+4855-                    # Crear nuevo proveedor
+4856-                    print(f"\n{self.COLOR_AMARILLO}   📝 NUEVO PROVEEDOR{self.COLOR_RESET}")
+4857-                    rif = input("   RIF: ").upper()
+4858-                    razon = input("   Razón Social: ")
+4859-                    telefono = input("   Teléfono (opcional): ").strip() or None
+4860-                    email = input("   Email (opcional): ").strip() or None
+4861-                    direccion = input("   Dirección (opcional): ").strip() or None
+4862-                    
+4863-                    print(f"{self.COLOR_VERDE}   ✅ Proveedor creado exitosamente (simulado){self.COLOR_RESET}")
+4864-                    idproveedor = 999  # Simulado
+4865-                else:
+4866-                    proveedores = []
+4867-                    if subopcion == '1':
+4868-                        rif = input("   RIF: ").upper()
+4869-                        proveedor = self.proveedor_service.buscar_por_rif(rif)
+4870-                        if proveedor:
+4871-                            proveedores = [proveedor]
+4872-                    elif subopcion == '2':
+4873-                        nombre = input("   Nombre/Razón social: ")
+4874-                        proveedores = self.proveedor_service.buscar_por_nombre(nombre)
+4875-                    elif subopcion == '3':
+4876-                        proveedores = self.proveedor_service.listar()
+4877-                    
+4878-                    if not proveedores:
+4879-                        print(f"{self.COLOR_ROJO}❌ No se encontraron proveedores{self.COLOR_RESET}")
+4880-                        self.pausa()
+4881-                        return
+4882-                    
+4883-                    print(f"\n{self.COLOR_VERDE}   Proveedores encontrados:{self.COLOR_RESET}")
+4884-                    for i, p in enumerate(proveedores[:10], 1):
+4885-                        print(f"   {i}. {p.get('razon_social', 'N/A')} - {p.get('num_documento', 'N/A')}")
+4886-                    print(f"   {self.COLOR_ROJO}0. Cancelar{self.COLOR_RESET}")
+4887-                    
+4888-                    try:
+4889-                        idx = int(input("\n   Seleccione proveedor: ")) - 1
+4890-                        if idx == -1:
+4891-                            return
+4892-                        proveedor_sel = proveedores[idx]
+4893-                        idproveedor = proveedor_sel['idproveedor']
+4894-                    except (ValueError, IndexError):

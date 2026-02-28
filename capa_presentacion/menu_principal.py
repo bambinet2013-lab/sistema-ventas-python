@@ -1622,7 +1622,12 @@ class SistemaVentas:
                     codigo = a.get('codigo', '') or a.get('plu', '') or 'S/C'
                 codigo = codigo[:14]
                 
-                nombre = a.get('nombre', '')[:29]
+                nombre_base = a.get('nombre', '')
+                letra_fiscal = a.get('letra_fiscal', '')
+                if letra_fiscal:
+                    nombre = f"{nombre_base} ({letra_fiscal})"[:29]
+                else:
+                    nombre = nombre_base[:29]
                 categoria = a.get('categoria_nombre', a.get('categoria', 'Sin categoría'))[:19]
                 precio = a.get('precio_venta', 0)
                 stock_actual = a.get('stock_actual', 0)
@@ -5048,7 +5053,7 @@ class SistemaVentas:
                     
                     items_recibidos.append({
                         'idarticulo': articulo['idarticulo'],
-                        'codigo': codigo_barras, 
+                        'codigo': articulo['codigo'],
                         'nombre': articulo['nombre'],
                         'cantidad': cantidad,
                         'lote': lote,
@@ -5086,29 +5091,60 @@ class SistemaVentas:
                     print(f"{self.COLOR_ROJO}   ❌ Nombre obligatorio{self.COLOR_RESET}")
                     continue
                 
-                print("   Categoría:")
-                print("   [1] Electrónicos")
-                print("   [2] Alimentos")
-                print("   [3] Bebidas")
-                print("   [4] Abarrotes")
-                print("   [5] Otro")
-                cat_opcion = input("   Seleccione: ")
+                # ===== DETECCIÓN AUTOMÁTICA DE CATEGORÍA =====
+                from capa_negocio.ia_productos_service import IAProductosService
+                ia_service = IAProductosService()
+                categoria_detectada = ia_service.detectar_categoria_venezolana(nombre)
                 
-                # Mapear categoría a ID
-                idcategoria = 1  # Por defecto
-                categoria_nombre = 'Otro'
-                if cat_opcion == '1':
-                    idcategoria = 1
-                    categoria_nombre = 'Electrónicos'
-                elif cat_opcion == '2':
-                    idcategoria = 2
-                    categoria_nombre = 'Alimentos'
-                elif cat_opcion == '3':
-                    idcategoria = 3
-                    categoria_nombre = 'Bebidas'
-                elif cat_opcion == '4':
-                    idcategoria = 4
-                    categoria_nombre = 'Abarrotes'
+                # Mapeo de IDs a nombres venezolanos
+                categorias = {
+                    1: 'Electrónicos',
+                    2: 'Víveres',
+                    3: 'Bebidas',
+                    4: 'Lácteos',
+                    5: 'Otros',
+                    7: 'Perecederos',
+                    8: 'Limpieza',
+                    9: 'Higiene'
+                }
+                
+                print(f"\n   {self.COLOR_VERDE}🤖 Categorías disponibles:{self.COLOR_RESET}")
+                # Mostrar en orden lógico
+                for cat_id in [1,2,3,4,7,8,9,5]:
+                    cat_nombre = categorias.get(cat_id, 'Desconocido')
+                    marca = "👉" if cat_id == categoria_detectada else "  "
+                    print(f"   {marca} [{cat_id}] {cat_nombre}")
+                
+                if categoria_detectada and categoria_detectada != 5:
+                    print(f"\n   {self.COLOR_VERDE}🤖 Categoría sugerida: {categorias.get(categoria_detectada, 'Otros')} (ID: {categoria_detectada}){self.COLOR_RESET}")
+                    opcion = input(f"   Presione Enter para aceptar, o ingrese otro número: ").strip()
+                    if opcion:
+                        try:
+                            idcategoria = int(opcion)
+                            if idcategoria not in categorias:
+                                print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando sugerencia{self.COLOR_RESET}")
+                                idcategoria = categoria_detectada
+                        except:
+                            idcategoria = categoria_detectada
+                    else:
+                        idcategoria = categoria_detectada
+                else:
+                    # Si no hay sugerencia o es Otros, preguntar
+                    print("\n   Seleccione categoría:")
+                    opcion = input("   Número: ").strip()
+                    try:
+                        idcategoria = int(opcion)
+                        if idcategoria not in categorias:
+                            print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando Otros (5){self.COLOR_RESET}")
+                            idcategoria = 5
+                    except:
+                        print(f"   {self.COLOR_AMARILLO}⚠️ Entrada inválida, usando Otros (5){self.COLOR_RESET}")
+                        idcategoria = 5
+                
+                # ===== OBTENER NOMBRE DE CATEGORÍA =====
+                categoria_nombre = categorias.get(idcategoria, 'Otros')
+                # ========================================
+                # ===== FIN DETECCIÓN =====
                 
                 unidad = input("   Unidad de medida: ")
                 if not unidad:
@@ -5314,7 +5350,7 @@ class SistemaVentas:
                             print(f"🔍 DEBUG - Llamando a crear_articulo con codigo_barras={item['codigo']}")
                             
                             nuevo_id = self.articulo_service.crear_articulo(
-                                codigo_barras=item['codigo'],  # ← Usa 'codigo' (el código de barras)
+                                codigo_barras_original=item['codigo'], 
                                 nombre=item['nombre'],
                                 idcategoria=item.get('idcategoria', 1),
                                 precio_venta=item['precio'],

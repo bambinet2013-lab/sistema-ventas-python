@@ -26,10 +26,13 @@ class ArticuloRepositorio:
             SELECT a.idarticulo, a.codigo, a.nombre, a.descripcion, a.imagen,
                    a.idcategoria, c.nombre as categoria,
                    a.idpresentacion, p.nombre as presentacion,
-                   a.precio_venta, a.precio_referencia
+                   a.precio_venta, a.precio_referencia, a.stock_minimo,
+                   a.codigo_barras_original, a.id_impuesto,
+                   i.letra_fiscal, i.nombre as tipo_impuesto
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            LEFT JOIN impuesto i ON a.id_impuesto = i.id_impuesto
             ORDER BY a.idarticulo DESC
             """
             cursor.execute(query)
@@ -44,15 +47,11 @@ class ArticuloRepositorio:
             
             logger.info(f"✅ {len(result)} artículos listados")
             return result
-            
         except Exception as e:
             logger.error(f"Error al listar artículos: {e}")
             return []
     
     def obtener_por_id(self, idarticulo):
-        """
-        Obtiene un artículo por su ID
-        """
         try:
             cursor = self.conn.cursor()
             query = """
@@ -60,7 +59,7 @@ class ArticuloRepositorio:
                    a.idcategoria, c.nombre as categoria,
                    a.idpresentacion, p.nombre as presentacion,
                    a.precio_venta, a.precio_referencia, a.stock_minimo,
-                   a.codigo_barras_original
+                   a.codigo_barras_original, a.id_impuesto  -- ← AGREGAR
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
@@ -73,15 +72,11 @@ class ArticuloRepositorio:
                 columns = [column[0] for column in cursor.description]
                 return dict(zip(columns, row))
             return None
-            
         except Exception as e:
             logger.error(f"Error al obtener artículo por ID {idarticulo}: {e}")
             return None
-    
+
     def buscar_por_codigo(self, codigo):
-        """
-        Busca un artículo por su código de barras o código interno
-        """
         try:
             cursor = self.conn.cursor()
             query = """
@@ -89,7 +84,7 @@ class ArticuloRepositorio:
                    a.idcategoria, c.nombre as categoria,
                    a.idpresentacion, p.nombre as presentacion,
                    a.precio_venta, a.precio_referencia, a.stock_minimo,
-                   a.codigo_barras_original
+                   a.codigo_barras_original, a.id_impuesto  -- ← AGREGAR
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
@@ -102,7 +97,6 @@ class ArticuloRepositorio:
                 columns = [column[0] for column in cursor.description]
                 return dict(zip(columns, row))
             return None
-            
         except Exception as e:
             logger.error(f"Error al buscar artículo por código {codigo}: {e}")
             return None
@@ -138,44 +132,31 @@ class ArticuloRepositorio:
     def crear(self, codigo, nombre, idcategoria, idpresentacion, 
               codigo_barras_original=None, descripcion=None, 
               imagen=None, precio_venta=0, precio_referencia=None, 
-              stock_minimo=5):
+              stock_minimo=5, id_impuesto=2):  # ← NUEVO PARÁMETRO
         """
         Crea un nuevo artículo en la base de datos
-        
-        Args:
-            codigo: Código profesional del artículo
-            nombre: Nombre del artículo
-            idcategoria: ID de la categoría
-            idpresentacion: ID de la presentación
-            codigo_barras_original: Código de barras original
-            descripcion: Descripción del artículo
-            imagen: Imagen del artículo
-            precio_venta: Precio de venta
-            precio_referencia: Precio de referencia
-            stock_minimo: Stock mínimo
-            igtf: Aplica IGTF
         """
         try:
             cursor = self.conn.cursor()
             query = """
             INSERT INTO articulo 
             (codigo, nombre, idcategoria, idpresentacion, codigo_barras_original,
-             descripcion, imagen, precio_venta, precio_referencia, stock_minimo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             descripcion, imagen, precio_venta, precio_referencia, stock_minimo,
+             id_impuesto)  -- ← NUEVA COLUMNA
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             cursor.execute(query, (
                 codigo, nombre, idcategoria, idpresentacion, codigo_barras_original,
-                descripcion, imagen, precio_venta, precio_referencia, stock_minimo
+                descripcion, imagen, precio_venta, precio_referencia, stock_minimo,
+                id_impuesto  # ← NUEVO VALOR
             ))
             
-            # Obtener el ID del artículo insertado
             cursor.execute("SELECT @@IDENTITY AS id")
             row = cursor.fetchone()
             idarticulo = row[0] if row else None
-            
             self.conn.commit()
             
-            logger.info(f"✅ Artículo creado con ID: {idarticulo} - Código: {codigo} - Precio: {precio_venta}")
+            logger.info(f"✅ Artículo creado con ID: {idarticulo} - Código: {codigo}")
             return idarticulo
             
         except Exception as e:

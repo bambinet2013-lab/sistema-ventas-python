@@ -84,35 +84,65 @@ class ArticuloService(BaseService):
             logger.error(f"❌ Error buscando por código {codigo}: {e}")
             return None
     
-    def crear_articulo(self, codigo_barras: str, nombre: str, idcategoria: int,
-                       precio_venta: float, stock_minimo: int = 5,
-                       precio_compra: float = 0) -> Optional[int]:
+    def buscar_por_nombre(self, nombre):
+        """
+        Busca artículos por nombre (búsqueda parcial)
+        
+        Args:
+            nombre: Nombre o parte del nombre a buscar
+            
+        Returns:
+            list: Lista de artículos que coinciden con el nombre
+        """
+        try:
+            if not nombre:
+                logger.warning("⚠️ Nombre de búsqueda vacío")
+                return []
+            
+            # Obtener todos los artículos
+            articulos = self.listar_articulos()
+            resultados = []
+            
+            # Filtrar por nombre (búsqueda case-insensitive)
+            nombre_busqueda = nombre.lower()
+            for a in articulos:
+                if nombre_busqueda in a.get('nombre', '').lower():
+                    resultados.append(a)
+            
+            logger.info(f"✅ {len(resultados)} artículos encontrados para '{nombre}'")
+            return resultados
+            
+        except Exception as e:
+            logger.error(f"❌ Error buscando por nombre '{nombre}': {e}")
+            return []
+
+    def crear_articulo(self, codigo_barras_original: str, nombre: str, 
+                       idcategoria: int = 2, precio_venta: float = 0,
+                       stock_minimo: int = 5, precio_compra: float = 0, 
+                       id_impuesto: int = None) -> Optional[int]:
         """
         Crea un nuevo artículo con código profesional automático
         
         Args:
-            codigo_barras: Código de barras del producto
+            codigo_barras_original: Código de barras real del producto
             nombre: Nombre del artículo
-            idcategoria: ID de la categoría
+            idcategoria: ID de la categoría (por defecto 2 = Alimentos)
             precio_venta: Precio de venta en USD
             stock_minimo: Stock mínimo para alertas
             precio_compra: Precio de compra (opcional)
-            igtf: Aplica IGTF (True/False)
+            id_impuesto: ID del impuesto (opcional, se puede detectar con IA)
             
         Returns:
             Optional[int]: ID del artículo creado o None
         """
         try:
             # Validaciones
-            if not codigo_barras:
+            if not codigo_barras_original:
                 logger.warning("⚠️ Código de barras obligatorio")
                 return None
                 
             if not nombre:
                 logger.warning("⚠️ Nombre obligatorio")
-                return None
-                
-            if not self.validar_entero_positivo(idcategoria, "ID de categoría"):
                 return None
                 
             if precio_venta <= 0:
@@ -123,54 +153,87 @@ class ArticuloService(BaseService):
             from capa_negocio.utils import generar_codigo_profesional
             codigo = generar_codigo_profesional()
             
-            # DEBUG - Ver código generado
             logger.info(f"🔑 Código profesional generado: {codigo}")
-            print(f"🔍 DEBUG - Codigo profesional: {codigo}")
-            print(f"🔍 DEBUG - Codigo barras recibido: {codigo_barras}")
             
             # Verificar que el código generado no exista ya
             intentos = 0
             while self.repositorio.buscar_por_codigo(codigo) and intentos < 10:
                 codigo = generar_codigo_profesional()
                 intentos += 1
-                print(f"🔍 DEBUG - Reintentando código: {codigo} (intento {intentos})")
             
             if intentos >= 10:
                 logger.error("❌ No se pudo generar un código único después de 10 intentos")
                 return None
             
-            logger.info(f"🔑 Código profesional generado: {codigo}")
+            # ===== DETECCIÓN DE IMPUESTO CON IA =====
+            if id_impuesto is None:
+                from capa_negocio.ia_productos_service import IAProductosService
+                ia_service = IAProductosService()
+                sugerencia = ia_service.analizar_producto(nombre)
+                
+                if sugerencia:
+                    id_impuesto = sugerencia['id_impuesto']
+                    nombre_impuesto = ia_service.obtener_nombre_impuesto(id_impuesto)
+                    letra = ia_service.obtener_letra_fiscal(id_impuesto)
+                    
+                    print(f"\n{'='*50}")
+                    print(f"🤖 IA DETECTÓ:")
+                    print(f"   Producto: {nombre}")
+                    print(f"   Impuesto: {nombre_impuesto} ({letra})")
+                    print(f"   Confianza: {sugerencia['confianza']:.0%}")
+                    print('='*50)
+                    
+                    if sugerencia['confianza'] < 0.9:
+                        respuesta = input("¿Aceptar? (Enter=Sí, N=No): ").upper()
+                        if respuesta == 'N':
+                            id_impuesto = self._preguntar_impuesto_manual()
+                else:
+                    id_impuesto = self._preguntar_impuesto_manual()
+            # ===== FIN DETECCIÓN =====
             
-            # Crear artículo
+            # Crear artículo en BD
             idarticulo = self.repositorio.crear(
-                codigo=codigo,                    # ← Código profesional generado
-                codigo_barras_original=codigo_barras,  # ← Código de barras original
+                codigo=codigo,
+                codigo_barras_original=codigo_barras_original,
                 nombre=nombre,
                 idcategoria=idcategoria,
-                idpresentacion=1,                  # Valor por defecto
+                idpresentacion=1,
                 precio_venta=precio_venta,
                 precio_referencia=precio_venta,
                 stock_minimo=stock_minimo,
+                id_impuesto=id_impuesto
             )
             
             if idarticulo:
                 logger.info(f"✅ Artículo creado: {nombre} (ID: {idarticulo}, Código: {codigo})")
-                print(f"🔍 DEBUG - Artículo creado con ID: {idarticulo}")
-                
-                # Registrar en auditoría
                 self.registrar_auditoria(
                     accion='CREAR',
                     tabla='articulo',
                     registro_id=idarticulo,
-                    datos_nuevos=f"Código: {codigo}, Código barras: {codigo_barras}, Nombre: {nombre}, Precio: ${precio_venta:.2f}"
+                    datos_nuevos=f"Código: {codigo}, Código barras: {codigo_barras_original}, Nombre: {nombre}, Impuesto: {id_impuesto}"
                 )
                 
             return idarticulo
             
         except Exception as e:
             logger.error(f"❌ Error creando artículo: {e}")
-            print(f"🔍 DEBUG - Error en crear_articulo: {e}")
             return None
+
+    def _preguntar_impuesto_manual(self) -> int:
+        """Pregunta al usuario qué impuesto asignar"""
+        print("\nSeleccione impuesto manualmente:")
+        print("1. Exento (E) - 0%")
+        print("2. General (G) - 16%")
+        print("3. Reducida (R) - 8%")
+        print("4. Adicional (A) - 31%")
+        try:
+            opcion = int(input("Opción: "))
+            if 1 <= opcion <= 4:
+                return opcion
+        except:
+            pass
+        print("⚠️ Opción inválida, usando General (2)")
+        return 2
     
     def actualizar_articulo(self, idarticulo: int, codigo_barras: str, nombre: str,
                             idcategoria: int, precio_venta: float, stock_minimo: int = 5,
