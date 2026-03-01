@@ -5091,61 +5091,110 @@ class SistemaVentas:
                     print(f"{self.COLOR_ROJO}   ❌ Nombre obligatorio{self.COLOR_RESET}")
                     continue
                 
-                # ===== DETECCIÓN AUTOMÁTICA DE CATEGORÍA =====
+                # ===== DETECCIÓN DE CATEGORÍA CON IA =====
                 from capa_negocio.ia_productos_service import IAProductosService
                 ia_service = IAProductosService()
-                categoria_detectada = ia_service.detectar_categoria_venezolana(nombre)
+                resultado_ia = ia_service.analizar_producto(nombre)
                 
-                # Mapeo de IDs a nombres venezolanos
-                categorias = {
-                    1: 'Electrónicos',
-                    2: 'Víveres',
-                    3: 'Bebidas',
-                    4: 'Lácteos',
-                    5: 'Otros',
-                    7: 'Perecederos',
-                    8: 'Limpieza',
-                    9: 'Higiene'
-                }
+                # Variables para categoría
+                idcategoria = 2  # Valor por defecto
+                categoria_nombre = 'Víveres'
+                es_moto = False
                 
-                print(f"\n   {self.COLOR_VERDE}🤖 Categorías disponibles:{self.COLOR_RESET}")
-                # Mostrar en orden lógico
-                for cat_id in [1,2,3,4,7,8,9,5]:
-                    cat_nombre = categorias.get(cat_id, 'Desconocido')
-                    marca = "👉" if cat_id == categoria_detectada else "  "
-                    print(f"   {marca} [{cat_id}] {cat_nombre}")
-                
-                if categoria_detectada and categoria_detectada != 5:
-                    print(f"\n   {self.COLOR_VERDE}🤖 Categoría sugerida: {categorias.get(categoria_detectada, 'Otros')} (ID: {categoria_detectada}){self.COLOR_RESET}")
-                    opcion = input(f"   Presione Enter para aceptar, o ingrese otro número: ").strip()
+                if resultado_ia and resultado_ia.get('tipo') == 'MOTOS':
+                    # ===== PRODUCTO DE MOTOS =====
+                    es_moto = True
+                    idcategoria = resultado_ia['idcategoria']
+                    categoria_nombre = resultado_ia['nombre_categoria']
+                    
+                    print(f"\n   {self.COLOR_VERDE}🏍️ Producto de MOTOS detectado:{self.COLOR_RESET}")
+                    print(f"   Categoría: {categoria_nombre} (ID: {idcategoria})")
+                    print(f"   Impuesto: General (G) - 16%")
+                    
+                    # Mostrar categorías de motos disponibles
+                    categorias_motos = {
+                        101: 'Motor', 102: 'Transmisión', 103: 'Frenos',
+                        104: 'Suspensión', 105: 'Eléctrico', 106: 'Lubricantes',
+                        107: 'Filtros', 108: 'Cauchos', 109: 'Accesorios',
+                        110: 'Herramientas', 111: 'Servicios'
+                    }
+                    
+                    print(f"\n   {self.COLOR_VERDE}Categorías de motos:{self.COLOR_RESET}")
+                    for cat_id, cat_nom in categorias_motos.items():
+                        marca = "👉" if cat_id == idcategoria else "  "
+                        print(f"   {marca} [{cat_id}] {cat_nom}")
+                    
+                    opcion = input(f"\n   Presione Enter para aceptar [{categoria_nombre}], o ingrese otro número: ").strip()
                     if opcion:
                         try:
                             idcategoria = int(opcion)
-                            if idcategoria not in categorias:
-                                print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando sugerencia{self.COLOR_RESET}")
-                                idcategoria = categoria_detectada
+                            if idcategoria in categorias_motos:
+                                categoria_nombre = categorias_motos[idcategoria]
+                            else:
+                                print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando detectada{self.COLOR_RESET}")
                         except:
-                            idcategoria = categoria_detectada
-                    else:
-                        idcategoria = categoria_detectada
+                            pass  # Usar la detectada
+                    
                 else:
-                    # Si no hay sugerencia o es Otros, preguntar
-                    print("\n   Seleccione categoría:")
-                    opcion = input("   Número: ").strip()
+                    # ===== PRODUCTO DE SUPERMERCADO =====
+                    print(f"\n   {self.COLOR_VERDE}🛒 Producto de SUPERMERCADO detectado{self.COLOR_RESET}")
+                    
+                    # 👇 CATEGORÍAS DE SUPERMERCADO (las tuyas)
+                    categorias_super = {
+                        1: 'Electrónicos',
+                        2: 'Víveres',
+                        3: 'Bebidas',
+                        4: 'Lácteos',
+                        5: 'Otros',
+                        7: 'Perecederos',
+                        8: 'Limpieza',
+                        9: 'Higiene'
+                    }
+                    
+                    print(f"\n   {self.COLOR_VERDE}Categorías disponibles:{self.COLOR_RESET}")
+                    for cat_id, cat_nom in categorias_super.items():
+                        print(f"   [{cat_id}] {cat_nom}")
+                    
+                    opcion = input(f"\n   Seleccione categoría [2]: ").strip()
+                    if opcion:
+                        try:
+                            idcategoria = int(opcion)
+                            if idcategoria in categorias_super:
+                                categoria_nombre = categorias_super[idcategoria]
+                            else:
+                                print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando Víveres (2){self.COLOR_RESET}")
+                                idcategoria = 2
+                                categoria_nombre = 'Víveres'
+                        except:
+                            idcategoria = 2
+                            categoria_nombre = 'Víveres'
+                    else:
+                        idcategoria = 2
+                        categoria_nombre = 'Víveres'
+                
+                # ===== CAMPOS ADICIONALES PARA MOTOS =====
+                marca_moto = None
+                modelo_moto = None
+                año_desde = None
+                año_hasta = None
+                cilindrada = None
+                
+                if es_moto:
+                    print(f"\n   {self.COLOR_AMARILLO}📋 DATOS ESPECÍFICOS DE LA MOTO:{self.COLOR_RESET}")
+                    marca_moto = input("   Marca (ej. Empire, Bera, Honda): ").strip() or None
+                    modelo_moto = input("   Modelo (opcional): ").strip() or None
+                    
                     try:
-                        idcategoria = int(opcion)
-                        if idcategoria not in categorias:
-                            print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando Otros (5){self.COLOR_RESET}")
-                            idcategoria = 5
+                        año = input("   Año (opcional): ").strip()
+                        if año:
+                            año_desde = int(año)
+                            año_hasta = año_desde
                     except:
-                        print(f"   {self.COLOR_AMARILLO}⚠️ Entrada inválida, usando Otros (5){self.COLOR_RESET}")
-                        idcategoria = 5
+                        pass
+                    
+                    cilindrada = input("   Cilindrada (ej. 150cc, 200cc): ").strip() or None
                 
-                # ===== OBTENER NOMBRE DE CATEGORÍA =====
-                categoria_nombre = categorias.get(idcategoria, 'Otros')
-                # ========================================
-                # ===== FIN DETECCIÓN =====
-                
+                # ===== CONTINÚA CON EL RESTO (unidad, cantidad, precio) =====
                 unidad = input("   Unidad de medida: ")
                 if not unidad:
                     unidad = "Unidad"
@@ -5186,7 +5235,12 @@ class SistemaVentas:
                         'lote': lote,
                         'vencimiento': vencimiento,
                         'precio': precio,
-                        'es_nuevo': True
+                        'es_nuevo': True,
+                        'marca_moto': marca_moto,
+                        'modelo_moto': modelo_moto,
+                        'año_desde': año_desde,
+                        'año_hasta': año_hasta,
+                        'cilindrada': cilindrada
                     })
                     
                     productos_nuevos += 1

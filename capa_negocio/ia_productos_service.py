@@ -12,6 +12,46 @@ class IAProductosService:
         self.palabras_clave = {}  # {palabra: id_impuesto}
         self.marcas_conocidas = {} # {marca: id_impuesto}
         self.cargar_reglas_iniciales()
+
+    def detectar_categoria_motos(self, nombre: str) -> Optional[Dict]:
+        """
+        Detecta si el producto pertenece a la categoría de motos
+        y devuelve el ID de categoría (101-111) e impuesto (siempre 2 - General)
+        """
+        if not nombre:
+            return None
+        
+        nombre_upper = nombre.upper()
+        
+        # Reglas para cada categoría de motos
+        reglas_motos = [
+            # (palabras clave, idcategoria, nombre_categoria)
+            (['PISTON', 'ANILLO', 'CIGUEÑAL', 'VALVULA', 'EMPACADURA'], 101, 'Motor'),
+            (['CADENA', 'PIÑON', 'CORONA', 'CORREA', 'EMBRAGUE'], 102, 'Transmisión'),
+            (['PASTILLA', 'BANDA', 'DISCO FRENO', 'GUAYA', 'FRENO'], 103, 'Frenos'),
+            (['AMORTIGUADOR', 'BARRA', 'RODAMIENTO', 'SUSPENSION'], 104, 'Suspensión'),
+            (['BATERIA', 'BUJIA', 'CDI', 'REGULADOR', 'BOMBILLO', 'BOYA'], 105, 'Eléctrico'),
+            (['ACEITE 2T', 'ACEITE 4T', 'LIGA FRENO', 'LUBRICANTE', 'ACEITE MOTOR'], 106, 'Lubricantes'),
+            (['FILTRO ACEITE', 'FILTRO AIRE', 'FILTRO GASOLINA'], 107, 'Filtros'),
+            (['CAUCHO', 'LLANTA', 'TRIPA', 'NEUMATICO', 'CAMARA'], 108, 'Cauchos'),
+            (['CASCO', 'GUANTE', 'CHAQUETA', 'MALETERO', 'CALCOMANIA', 'PEGATINA'], 109, 'Accesorios'),
+            (['HERRAMIENTA', 'LLAVE', 'DESARMADOR', 'ALICATE', 'JUEGO LLAVES'], 110, 'Herramientas'),
+            (['SERVICIO', 'MANO OBRA', 'REPARACION', 'CAMBIO ACEITE', 'ENTONACION'], 111, 'Servicios')
+        ]
+        
+        # Buscar coincidencias
+        for palabras, cat_id, cat_nombre in reglas_motos:
+            if any(palabra in nombre_upper for palabra in palabras):
+                return {
+                    'idcategoria': cat_id,
+                    'nombre_categoria': cat_nombre,
+                    'id_impuesto': 2,  # Siempre General (G) para motos
+                    'confianza': 0.90,
+                    'tipo': 'MOTOS',
+                    'palabra_encontrada': [p for p in palabras if p in nombre_upper][0]
+                }
+        
+        return None
     
     def cargar_reglas_iniciales(self):
         """Carga reglas por defecto en memoria"""
@@ -34,13 +74,23 @@ class IAProductosService:
         logger.info(f"✅ IAProductosService inicializado con {len(self.palabras_clave)} palabras clave")
     
     def analizar_producto(self, nombre: str) -> Optional[Dict]:
-        """Analiza el nombre del producto y sugiere el impuesto"""
+        """
+        Analiza el nombre del producto y sugiere el impuesto y categoría
+        Primero intenta con motos, luego con supermercado
+        """
         if not nombre:
             return None
         
+        # 1. Intentar detectar si es producto de motos
+        resultado_motos = self.detectar_categoria_motos(nombre)
+        if resultado_motos:
+            logger.info(f"🏍️ Producto de motos detectado: {resultado_motos['nombre_categoria']}")
+            return resultado_motos
+        
+        # 2. Si no es moto, usar la lógica existente de supermercado
         nombre_lower = nombre.lower()
         
-        # 1. Buscar por marca (prioridad alta)
+        # Buscar por marca (prioridad alta)
         for marca, impuesto in self.marcas_conocidas.items():
             if marca in nombre_lower:
                 return {
@@ -50,7 +100,7 @@ class IAProductosService:
                     'palabra': marca
                 }
         
-        # 2. Buscar por palabra clave
+        # Buscar por palabra clave
         palabras_encontradas = []
         for palabra, impuesto in self.palabras_clave.items():
             if palabra in nombre_lower:

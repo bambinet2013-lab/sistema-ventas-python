@@ -52,6 +52,9 @@ class ArticuloRepositorio:
             return []
     
     def obtener_por_id(self, idarticulo):
+        """
+        Obtiene un artículo por su ID
+        """
         try:
             cursor = self.conn.cursor()
             query = """
@@ -59,10 +62,12 @@ class ArticuloRepositorio:
                    a.idcategoria, c.nombre as categoria,
                    a.idpresentacion, p.nombre as presentacion,
                    a.precio_venta, a.precio_referencia, a.stock_minimo,
-                   a.codigo_barras_original, a.id_impuesto  -- ← AGREGAR
+                   a.codigo_barras_original, a.id_impuesto,
+                   i.letra_fiscal, i.nombre as tipo_impuesto
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            LEFT JOIN impuesto i ON a.id_impuesto = i.id_impuesto
             WHERE a.idarticulo = ?
             """
             cursor.execute(query, (idarticulo,))
@@ -72,11 +77,15 @@ class ArticuloRepositorio:
                 columns = [column[0] for column in cursor.description]
                 return dict(zip(columns, row))
             return None
+            
         except Exception as e:
             logger.error(f"Error al obtener artículo por ID {idarticulo}: {e}")
             return None
 
     def buscar_por_codigo(self, codigo):
+        """
+        Busca un artículo por su código de barras o código interno
+        """
         try:
             cursor = self.conn.cursor()
             query = """
@@ -84,10 +93,12 @@ class ArticuloRepositorio:
                    a.idcategoria, c.nombre as categoria,
                    a.idpresentacion, p.nombre as presentacion,
                    a.precio_venta, a.precio_referencia, a.stock_minimo,
-                   a.codigo_barras_original, a.id_impuesto  -- ← AGREGAR
+                   a.codigo_barras_original, a.id_impuesto,
+                   i.letra_fiscal, i.nombre as tipo_impuesto
             FROM articulo a
             LEFT JOIN categoria c ON a.idcategoria = c.idcategoria
             LEFT JOIN presentacion p ON a.idpresentacion = p.idpresentacion
+            LEFT JOIN impuesto i ON a.id_impuesto = i.id_impuesto
             WHERE a.codigo = ? OR a.codigo_barras_original = ?
             """
             cursor.execute(query, (codigo, codigo))
@@ -97,6 +108,7 @@ class ArticuloRepositorio:
                 columns = [column[0] for column in cursor.description]
                 return dict(zip(columns, row))
             return None
+            
         except Exception as e:
             logger.error(f"Error al buscar artículo por código {codigo}: {e}")
             return None

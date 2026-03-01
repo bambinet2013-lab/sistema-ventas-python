@@ -292,7 +292,6 @@ class InventarioService(BaseService):
         Lista todos los artículos con su stock actual desde kardex
         """
         try:
-            # Usar el método correcto del servicio de artículos
             if not self.articulo_service:
                 logger.error("❌ ArticuloService no disponible")
                 return []
@@ -304,14 +303,15 @@ class InventarioService(BaseService):
                 logger.info("📭 No hay artículos registrados")
                 return []
             
-            # Enriquecer con stock actual
+            # Enriquecer con stock actual (sin perder otros campos)
             for art in articulos:
                 try:
                     stock = self.obtener_stock_articulo(art['idarticulo'])
                     art['stock_actual'] = stock
                     
-                    # DEBUG - Ver qué campos tiene cada artículo
-                    logger.debug(f"Artículo {art['idarticulo']}: {art.get('codigo_barras', 'NO CODE')}")
+                    # DEBUG - Verificar que letra_fiscal se mantiene
+                    if 'letra_fiscal' in art:
+                        logger.debug(f"Artículo {art['idarticulo']} tiene letra: {art['letra_fiscal']}")
                     
                 except Exception as e:
                     logger.error(f"Error obteniendo stock para artículo {art['idarticulo']}: {e}")
