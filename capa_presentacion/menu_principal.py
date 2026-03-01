@@ -5139,7 +5139,7 @@ class SistemaVentas:
                     # ===== PRODUCTO DE SUPERMERCADO =====
                     print(f"\n   {self.COLOR_VERDE}🛒 Producto de SUPERMERCADO detectado{self.COLOR_RESET}")
                     
-                    # 👇 CATEGORÍAS DE SUPERMERCADO (las tuyas)
+                    # 👇 CATEGORÍAS DE SUPERMERCADO
                     categorias_super = {
                         1: 'Electrónicos',
                         2: 'Víveres',
@@ -5151,26 +5151,35 @@ class SistemaVentas:
                         9: 'Higiene'
                     }
                     
+                    # Determinar categoría sugerida por la IA
+                    categoria_sugerida = 2  # Víveres por defecto
+                    if resultado_ia and 'idcategoria' in resultado_ia:
+                        categoria_sugerida = resultado_ia['idcategoria']
+                        categoria_sugerida_nombre = categorias_super.get(categoria_sugerida, 'Víveres')
+                        print(f"\n   {self.COLOR_VERDE}🤖 IA sugiere: {categoria_sugerida_nombre} (ID: {categoria_sugerida}){self.COLOR_RESET}")
+                    
                     print(f"\n   {self.COLOR_VERDE}Categorías disponibles:{self.COLOR_RESET}")
                     for cat_id, cat_nom in categorias_super.items():
-                        print(f"   [{cat_id}] {cat_nom}")
+                        marca = "👉" if cat_id == categoria_sugerida else "  "
+                        print(f"   {marca} [{cat_id}] {cat_nom}")
                     
-                    opcion = input(f"\n   Seleccione categoría [2]: ").strip()
+                    opcion = input(f"\n   Presione Enter para aceptar [{categoria_sugerida_nombre}], o ingrese otro número: ").strip()
+                    
                     if opcion:
                         try:
                             idcategoria = int(opcion)
                             if idcategoria in categorias_super:
                                 categoria_nombre = categorias_super[idcategoria]
                             else:
-                                print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando Víveres (2){self.COLOR_RESET}")
-                                idcategoria = 2
-                                categoria_nombre = 'Víveres'
+                                print(f"   {self.COLOR_AMARILLO}⚠️ Categoría no válida, usando sugerida{self.COLOR_RESET}")
+                                idcategoria = categoria_sugerida
+                                categoria_nombre = categorias_super.get(categoria_sugerida, 'Víveres')
                         except:
-                            idcategoria = 2
-                            categoria_nombre = 'Víveres'
+                            idcategoria = categoria_sugerida
+                            categoria_nombre = categorias_super.get(categoria_sugerida, 'Víveres')
                     else:
-                        idcategoria = 2
-                        categoria_nombre = 'Víveres'
+                        idcategoria = categoria_sugerida
+                        categoria_nombre = categorias_super.get(categoria_sugerida, 'Víveres')
                 
                 # ===== CAMPOS ADICIONALES PARA MOTOS =====
                 marca_moto = None

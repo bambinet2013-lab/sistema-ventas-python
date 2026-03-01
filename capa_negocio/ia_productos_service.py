@@ -86,8 +86,209 @@ class IAProductosService:
         if resultado_motos:
             logger.info(f"🏍️ Producto de motos detectado: {resultado_motos['nombre_categoria']}")
             return resultado_motos
+            # 2. Detectar chucherías y snacks
+        nombre_upper = nombre.upper()
         
-        # 2. Si no es moto, usar la lógica existente de supermercado
+        # ===== CHUCHERÍAS =====
+        # Papitas y snacks salados
+        if any(p in nombre_upper for p in ['PAPITA', 'DORITO', 'SNACK', 'BOTANA', 'CHIPS', 'PLATANUT', 'RUFLE']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'snack_salado'
+            }
+        
+        # Chocolates y bombones
+        if any(p in nombre_upper for p in ['CHOCOLATE', 'BOMBON', 'BOMBÓN', 'CONFITE']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'chocolate'
+            }
+        
+        # Caramelos y gomitas
+        if any(p in nombre_upper for p in ['CARAMELO', 'CHUPETA', 'GOMITA', 'MELOCHA']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'caramelo'
+            }
+        
+        # Galletas
+        if any(p in nombre_upper for p in ['GALLETA', 'WAFFER', 'ORE0', 'CLUB SOCIAL', 'MARIAS']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'galleta'
+            }
+        
+        # Términos generales para chucherías
+        if any(p in nombre_upper for p in ['CHUCHERIA', 'GOLOSINA']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.85,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres'
+            }
+        # ===== BEBIDAS PROCESADAS =====
+        # Maltas
+        if any(p in nombre_upper for p in ['MALTA', 'MALTIN', 'POLAR', 'REGIONAL']):
+            return {
+                'idcategoria': 3,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Bebidas',
+                'producto_tipo': 'malta'
+            }
+        
+        # Jugos pasteurizados
+        if any(p in nombre_upper for p in ['JUGO', 'NECTAR', 'PASTEURIZADO', 'DEL VALLE', 'TROPICAL']):
+            return {
+                'idcategoria': 3,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Bebidas',
+                'producto_tipo': 'jugo'
+            }
+        
+        # Bebidas energéticas
+        if any(p in nombre_upper for p in ['ENERGETICA', 'RED BULL', 'VIVE 100']):
+            return {
+                'idcategoria': 3,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Bebidas',
+                'producto_tipo': 'energetica'
+            }
+        
+        # Bebidas isotónicas
+        if any(p in nombre_upper for p in ['ISOTONICO', 'SPORADE', 'GATORADE']):
+            return {
+                'idcategoria': 3,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Bebidas',
+                'producto_tipo': 'isotonica'
+            }
+        # ===== ENLATADOS Y SALSAS =====
+        # Atún y pescados enlatados
+        if any(p in nombre_upper for p in ['ATUN', 'ATÚN', 'SARDINA', 'PESCADO ENLATADO']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'enlatado_pescado'
+            }
+        
+        # Salsas y condimentos
+        if any(p in nombre_upper for p in ['MAYONESA', 'KETCHUP', 'SALSA', 'TÁRTARA', 'CEASAR']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'salsa'
+            }
+        
+        # Términos generales para enlatados
+        if any(p in nombre_upper for p in ['ENLATADO', 'LATA', 'CONSERVA']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,
+                'confianza': 0.85,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres'
+            }
+        # ===== EMBUTIDOS Y FIAMBRES =====
+        # Embutidos básicos (EXENTOS)
+        if any(p in nombre_upper for p in ['JAMON', 'JAMÓN', 'SALCHICHA', 'MORTADELA', 'CHORIZO', 'LONGANIZA']):
+            return {
+                'idcategoria': 7,
+                'id_impuesto': 1,  # Exento
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Perecederos',
+                'producto_tipo': 'embutido_basico'
+            }
+        
+        # Embutidos procesados/importados (GENERALES)
+        if any(p in nombre_upper for p in ['PEPPERONI', 'SALAMI', 'JAMON YORK', 'JAMÓN YORK']):
+            return {
+                'idcategoria': 7,
+                'id_impuesto': 2,  # General
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Perecederos',
+                'producto_tipo': 'embutido_procesado'
+            }
+        # ===== QUESOS =====
+        # Quesos procesados/importados (GENERAL)
+        if any(p in nombre_upper for p in ['QUESO AMARILLO', 'QUESO CHEDDAR', 'QUESO PARMESANO', 'QUESO DE UNTAR', 'QUESO CREMA']):
+            return {
+                'idcategoria': 4,
+                'id_impuesto': 2,  # General
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Lácteos',
+                'producto_tipo': 'queso_procesado'
+            }
+        
+        # Quesos nacionales/frescos (EXENTOS)
+        if any(p in nombre_upper for p in ['QUESO BLANCO', 'QUESO FRESCO', 'QUESO PAISA', 'QUESO GUAYANÉS']):
+            return {
+                'idcategoria': 4,
+                'id_impuesto': 1,  # Exento
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Lácteos',
+                'producto_tipo': 'queso_fresco'
+            }
+        # ===== CAFÉ =====
+        # Café natural (EXENTO)
+        if any(p in nombre_upper for p in ['CAFE', 'CAFÉ', 'CAFE MOLIDO', 'CAFÉ MOLIDO', 'CAFE GRANO', 'CAFÉ GRANO']):
+            # Verificar que no sea instantáneo
+            if 'INSTANTANEO' not in nombre_upper and 'INSTANTÁNEO' not in nombre_upper and 'NESCAFE' not in nombre_upper:
+                return {
+                    'idcategoria': 2,
+                    'id_impuesto': 1,  # Exento
+                    'confianza': 0.90,
+                    'tipo': 'SUPERMERCADO',
+                    'categoria_nombre': 'Víveres',
+                    'producto_tipo': 'cafe_natural'
+                }
+        
+        # Café instantáneo/procesado (GENERAL)
+        if any(p in nombre_upper for p in ['CAFE INSTANTANEO', 'CAFÉ INSTANTÁNEO', 'NESCAFE', 'CAPUCCINO']):
+            return {
+                'idcategoria': 2,
+                'id_impuesto': 2,  # General
+                'confianza': 0.90,
+                'tipo': 'SUPERMERCADO',
+                'categoria_nombre': 'Víveres',
+                'producto_tipo': 'cafe_instantaneo'
+            }
+        
+        # 3. Si no es moto ni chuchería, usar la lógica existente de supermercado
         nombre_lower = nombre.lower()
         
         # Buscar por marca (prioridad alta)
